@@ -39,8 +39,9 @@ This project provides the data and search tools needed to answer those questions
 | Download and prepare Enterprise ATT&CK STIX | Implemented |
 | Preserve behavior examples before removing actor/software nodes | Implemented |
 | Load records and graph relationships into PostgreSQL | Implemented |
-| Create semantic embeddings and publish a Qdrant index | Implemented |
-| Read-only SQL and semantic-search HTTP tools | Implemented |
+| Publish dense semantic and sparse BM25 vectors in Qdrant | Implemented |
+| Read-only SQL and lexical/semantic/hybrid HTTP tools | Implemented |
+| LLM chooses search mode and relative hybrid weights | Implemented |
 | API-key authentication and generated OpenAPI schema | Implemented |
 | Public deployment and a configured Dify chatbot | Not included yet |
 
@@ -55,9 +56,11 @@ flowchart LR
     JSON --> PG[(PostgreSQL)]
     PG --> DOCS[Clean text and build chunks]
     DOCS --> EMB[OpenRouter embeddings]
+    DOCS --> BM25[Qdrant native BM25]
     EMB --> QD[(Qdrant)]
+    BM25 --> QD
     API[FastAPI search tools] -->|SQL| PG
-    API -->|Semantic search| QD
+    API -->|Semantic / lexical / weighted hybrid| QD
     DIFY[Future Dify agent] -.->|Authenticated tool calls| API
 ```
 
@@ -69,7 +72,7 @@ flowchart LR
 Groups, Campaigns, Malware, and Tools are removed from the graph. Before removal, descriptions
 from `uses` relationships are saved as behavior examples linked to techniques.
 
-The semantic index contains six evidence types:
+The retrieval index contains six evidence types:
 
 | Type | What it represents |
 | --- | --- |
@@ -89,7 +92,8 @@ See the [orchestrator guide](docs/orchestrator/semantic-search.md) for graph pat
 - Python 3.10 or newer; Python 3.12 is the tested version.
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) for dependencies and commands.
 - A PostgreSQL database you control.
-- A running Qdrant instance or Qdrant Cloud cluster.
+- Qdrant server 1.19 or newer, with native BM25 support; upgrade older servers first.
+  Weighted rank fusion is performed by the backend.
 - An OpenRouter key with access and credit for `google/gemini-embedding-2`.
 
 The project does not create a PostgreSQL server, a database account, or a Qdrant cluster.
@@ -97,7 +101,8 @@ Provision these first. For Qdrant setup, see the [official quickstart](https://q
 
 **Choose your path:** for empty databases, follow every setup step below. If PostgreSQL and
 Qdrant are already populated with a matching snapshot, configure their connections and skip
-directly to [Run and test the API](#run-and-test-the-api). Do not re-import data just to start the API.
+to the additive lexical upgrade below, then [Run and test the API](#run-and-test-the-api).
+Do not re-import data just to start the API.
 
 ## Install the project
 
@@ -149,9 +154,9 @@ TLS-enabled PostgreSQL service; local server settings can differ.
 | Variable | Used by | Required permissions or behavior |
 | --- | --- | --- |
 | `DATABASE_URL` | Import and indexing jobs | Import needs schema/table creation, row replacement, and COPY; indexing reads the source |
-| `OPENROUTER_API_KEY` | Indexing and semantic queries | Access to the configured embedding model |
-| `QDRANT_URL` | Indexing and semantic queries | Reachable Qdrant endpoint |
-| `QDRANT_API_KEY` | Indexing and semantic queries | Indexing needs collection/index creation, point writes, and alias updates |
+| `OPENROUTER_API_KEY` | Dense indexing and semantic/hybrid queries | Access to the configured embedding model; lexical search does not call OpenRouter |
+| `QDRANT_URL` | Indexing and all text-search modes | Reachable Qdrant endpoint |
+| `QDRANT_API_KEY` | Indexing and all text-search modes | Indexing needs collection/index creation, point writes, and alias updates |
 | `ATTACK_DATA_DIR` | Data preparation | Optional; defaults to `./data` |
 | `API_KEY` | FastAPI authentication | Random shared secret, at least 16 characters |
 | `API_BASE_URL` | OpenAPI / Dify | Publicly reachable HTTPS URL when deployed |
@@ -272,7 +277,8 @@ uv run attack-search index --workers 1
 
 The indexer reads **PostgreSQL**, not the local JSON files. It cleans and chunks source text,
 calls OpenRouter, creates a snapshot-specific Qdrant collection, creates payload indexes, and
-uploads vectors with their metadata. There is no manual vector-file upload step.
+uploads vectors with their metadata, and completes the named BM25 sparse vectors before publication.
+There is no manual vector-file upload step.
 
 The configured vector space is 3,072 dimensions with cosine distance. Every point contains its
 type, text, PostgreSQL source table and ID, linked techniques, and source-snapshot identity.
@@ -290,6 +296,20 @@ provider and cluster capacity support it.
 
 Embedding all documents has a cost. Check your provider balance and Qdrant capacity first.
 Do not change the model, dimensions, or chunk recipe while reusing an old vector index.
+
+### Upgrade an existing dense index to lexical and hybrid
+
+For an already published, matching PostgreSQL/Qdrant snapshot:
+
+```shell
+uv run attack-search index-lexical
+```
+
+This resumable command adds `lexical_bm25_v1` sparse vectors to the existing points. It preserves
+the physical collection, dense vectors, point IDs, and payloads and does not call OpenRouter.
+It validates the source snapshot and marks lexical readiness only after all points are covered.
+If interrupted, run the same command again. Do not refresh PostgreSQL during the upgrade.
+See [operations](docs/operations.md#add-lexical-search-to-an-existing-snapshot) for details.
 
 ## Run and test the API
 
@@ -309,7 +329,7 @@ update `API_BASE_URL` to match. API startup itself does not verify database conn
 | Endpoint | Operation ID | Input | Output |
 | --- | --- | --- | --- |
 | `POST /tools/sql` | `query_sql` | PostgreSQL SELECT/CTE and row limit | Columns, rows, row count, truncation flag |
-| `POST /tools/semantic-search` | `semantic_search` | Natural-language query and Qdrant filter | Ranked chunks, scores, and metadata |
+| `POST /tools/search` | `search_attack` | Mode, text, simple filters, and hybrid weights | Ranked chunks, score kind, and metadata |
 
 SQL request body:
 
@@ -320,25 +340,33 @@ SQL request body:
 }
 ```
 
-Semantic request body:
+Hybrid request body (the LLM chooses the mode and weights):
 
 ```json
 {
+  "mode": "hybrid",
   "query": "Attackers execute encoded commands using PowerShell",
-  "filter": {
-    "must": [
-      {"key": "is_active", "match": {"value": true}},
-      {"key": "type", "match": {"any": ["attack-pattern", "behavior_example"]}}
-    ]
+  "lexical_query": "PowerShell EncodedCommand",
+  "weights": {"semantic": 0.7, "lexical": 0.3},
+  "filters": {
+    "types": ["attack-pattern", "behavior_example"]
   },
   "limit": 5
 }
 ```
 
-The service embeds query text; the caller does not supply a vector. If `filter` is omitted,
-semantic search defaults to active points. An explicit empty object `{}` includes all statuses.
-Only supported indexed fields can be filtered. An exact count or a complete relationship list
-belongs in SQL, not semantic top-k.
+The caller supplies ordinary JSON, without vectors or Qdrant syntax. Use `mode: "semantic"`
+for meaning, `mode: "lexical"` for BM25 word matching, and `mode: "hybrid"` for weighted rank
+fusion. Single-mode requests omit `weights` and `lexical_query`. Lexical mode never requests an
+OpenRouter embedding. BM25 is token-based, not exact phrase or substring matching.
+
+`filters` defaults to active points, including when `{}` is supplied. Set `filters.is_active`
+to `null` for all statuses or `false` for inactive points. Hybrid weights are positive relative
+weights normalized by the backend; 7/3 and 0.7/0.3 mean the same thing. They weight retrieval
+ranks, not raw cosine and BM25 scores. Exact counts and complete lists belong in SQL.
+
+The old `POST /tools/semantic-search` route remains for existing clients with its original native
+`filter` contract. It is hidden from the new OpenAPI tool list; new agents use `search_attack`.
 
 See the [API guide](docs/api.md) for limits, error responses, filter support, and both response formats.
 
@@ -390,8 +418,9 @@ vectors; review changes to the embedding profile before serving an older index.
 2. Set `API_BASE_URL` to that HTTPS URL and restart the API.
 3. Import `/openapi.json` into Dify's custom-tool configuration.
 4. Set API-key authentication: header `X-API-Key`, raw key value, no `Bearer` prefix.
-5. Add `query_sql` and `semantic_search` to the agent.
-6. Supply the [orchestrator guide](docs/orchestrator/semantic-search.md) as retrieval context.
+5. Add `query_sql` and `search_attack` to the agent. Re-import the schema if it still lists `semantic_search`.
+6. Copy the system instructions and examples from the [LLM tool guide](docs/orchestrator/llm-tool-guide.md).
+   Use the [detailed orchestrator guide](docs/orchestrator/semantic-search.md) for graph/evidence policy.
 
 A localhost URL is not reachable from Dify Cloud. From inside a container, localhost normally
 points to that container. Keep API credentials in Dify's authentication settings, not in the
@@ -410,7 +439,7 @@ For an intentional data refresh:
 2. Run `uv run attack-search ingest --download`.
 3. Run `uv run attack-search index --dry-run` and review the expected index.
 4. Run `uv run attack-search index --workers 1` to complete and publish it.
-5. Verify SQL lookups and semantic results, then resume traffic.
+5. Verify SQL lookups and all three search modes, then resume traffic.
 
 The API does not provide automatic maintenance mode or cross-database snapshot checks.
 Behavior-example row numbers can change after an import, so stale Qdrant references must not
@@ -427,6 +456,7 @@ lead to repeated embedding charges. Old collections are retained; review storage
 | No published semantic alias | Complete a full `index` run; `--limit` does not publish |
 | Embedding rate-limit or quota error | Provider access/balance and concurrency; retry with fewer workers |
 | Qdrant rejects a payload filter | Use the indexed-field allowlist; resolve other constraints through SQL |
+| Lexical or hybrid index is not ready | Run `index-lexical` on the matching existing snapshot, or finish a full `index` run |
 | API returns 401 | Check the `X-API-Key` header and server `API_KEY` |
 | Different counts from the examples | Check the downloaded release and active-versus-all-records policy |
 
@@ -472,13 +502,15 @@ uv run ruff format --check src tests
 uv build
 ```
 
-**Last verification, 8 September 2026:** 115 offline tests passed, and lint/format checks passed.
+**Hybrid upgrade, 8 September 2026:** 225 offline tests passed, including lexical-only calls without
+an embedding client, hybrid weight reversal, input validation, filters, and resumable indexing.
 The tests use synthetic data, mocks, and local Qdrant storage; they do not write to cloud databases
 or spend embedding credits.
 
-Separate live smoke checks confirmed both HTTP tools. The SQL tool applied read-only/time/row
-limits, and semantic search ranked `T1059.001` first for the encoded-PowerShell example.
-These checks are not a broad retrieval-quality benchmark.
+Separate live smoke checks returned HTTP 200 for SQL, lexical, semantic, and hybrid calls with both
+70/30 and 30/70 weights. Changing the weights changed the ranking. All 23,240 published points had
+BM25 vectors; sampled dense-vector and payload hashes were unchanged after the additive upgrade.
+These checks are not a broad retrieval-quality benchmark or a hosted Dify integration test.
 
 The wheel includes the SQL schema. Generated JSON files and secrets are not included in either
 the wheel or source distribution.
@@ -487,10 +519,12 @@ the wheel or source distribution.
 
 | Guide | What to use it for |
 | --- | --- |
+| [Documentation map](docs/README.md) | Read the whole docs folder without confusing tool inputs, storage fields, and host operations |
 | [Project report](docs/report.md) | Design choices, the data-pipeline stage, and evaluation context |
 | [PostgreSQL schema](docs/appendices/postgresql.md) | Tables, views, columns, keys, cardinalities, and text-to-SQL examples |
 | [Qdrant schema](docs/appendices/qdrant.md) | Vector configuration, every payload field, source IDs, and inspected counts |
 | [Orchestrator guide](docs/orchestrator/semantic-search.md) | Intent routing, valid filters, graph resolution, and evidence rules |
+| [LLM tool guide](docs/orchestrator/llm-tool-guide.md) | Copyable system prompt, simple JSON calls, mode selection, and weights |
 | [API and Dify setup](docs/api.md) | Endpoint contracts, authentication, limits, and tool import |
 | [Operations guide](docs/operations.md) | Installation, refreshes, recovery, and development checks |
 | [Local data guide](data/README.md) | Generated-file layout and regeneration |
@@ -498,8 +532,8 @@ the wheel or source distribution.
 ## Scope and security
 
 - This is an **Enterprise ATT&CK retrieval backend**, not a complete autonomous security product.
-- No sparse/hybrid search, reranker, answer-generation model, or configured Dify workflow is included.
-- Semantic scores express text similarity, not proof of malicious activity or a confidence percentage.
+- No learned reranker, answer-generation model, or configured Dify workflow is included.
+- Scores rank retrieval evidence; cosine, BM25, and weighted RRF have different scales and are not confidence percentages.
 - Actor names may remain in behavior text, but removed actor nodes and original attribution links
   cannot be recovered as structured facts.
 - SQL accepts guarded SELECT/CTE queries with a read-only transaction, row cap, and timeout.

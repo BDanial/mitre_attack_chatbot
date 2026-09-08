@@ -1,3 +1,3 @@
-"""MITRE ATT&CK data preparation and semantic retrieval tools."""
+"""MITRE ATT&CK data preparation and semantic, lexical and hybrid retrieval tools."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

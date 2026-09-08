@@ -1,6 +1,12 @@
-# Semantic Search — Orchestrator Guide
+# ATT&CK Search — Orchestrator and Developer Reference
 
-Version 1 · Enterprise ATT&CK · Data reviewed on 7 September 2026; API handoff added 8 September 2026
+Version 0.2 tool contract · Enterprise ATT&CK · Data reviewed on 7 September 2026
+
+**Current LLM interface:** use only `query_sql` and `search_attack`.
+Follow the [LLM tool guide](llm-tool-guide.md), [API contract](../api.md), and
+[documentation map](../README.md). Examples F1-F6 below are complete current tool calls.
+SQL recipes S1-S6 use concrete values; place the SQL in the `query_sql.query` string.
+Storage field names are not automatically accepted as search filters.
 
 This guide explains **what to search, which filters to use, and how to verify the answer**.
 It is intended as context for an orchestrator and as a retrieval-policy reference. The collection,
@@ -16,15 +22,16 @@ the complete SQL catalog. This guide describes our implementation, not every pos
 
 1. Use Qdrant to find relevant **text evidence**. Use PostgreSQL to resolve IDs, follow links,
    check exact conditions, count records, and produce complete lists.
-2. Search the published alias `attack_semantic`. Do not select an old collection yourself.
+2. Call `search_attack`; the backend selects and pins the published alias. Never send a collection name.
 3. The only point types are `attack-pattern`, `behavior_example`, `course-of-action`,
    `x-mitre-detection-strategy`, `x-mitre-analytic`, and `mitigates`.
-4. For current guidance, use `is_active=true`. When a technique scope is known, also filter
-   `active_technique_ids` with the resolved technique STIX IDs. These checks have different meanings.
+4. For current guidance, use `filters.is_active=true`. For a known technique scope, use
+   `filters.technique_attack_ids` with display codes, then verify active graph paths with SQL.
+   `active_technique_ids` is returned metadata, not an accepted simple filter.
 5. An exact ID request is primarily a database lookup, not a similarity problem.
 6. `technique_ids` contains PostgreSQL STIX IDs. `technique_attack_ids` contains display codes
    such as `T1059.001`. Neither field contains Qdrant point UUIDs.
-7. Add a `type` filter. A technique-code filter alone also matches related examples, defenses,
+7. Add a `filters.types` list. A technique-code filter alone also matches related examples, defenses,
    and detection evidence; it does not mean “return technique nodes only.”
 8. Never filter an unindexed payload field. Resolve tactics, parent/child scope, analytic platforms,
    log sources, and component constraints through PostgreSQL when needed.
@@ -46,9 +53,9 @@ the complete SQL catalog. This guide describes our implementation, not every pos
 | Public alias | `attack_semantic` |
 | Physical collection at review | `attack_semantic_v1_1a8b0f1ed18b3c5cfd25` |
 | Dataset version | `19.2` |
-| Point granularity | One cleaned text chunk with one dense vector and one JSON payload |
+| Point granularity | One cleaned text chunk with dense + BM25 sparse vectors and one JSON payload after upgrade |
 | Model | `google/gemini-embedding-2`, through OpenRouter |
-| Vector | One unnamed, 3,072-dimensional vector; cosine distance |
+| Vectors | Unnamed dense, 3,072 dimensions/cosine; named `lexical_bm25_v1` sparse/IDF |
 | Pipeline version | String `"1"` |
 | Body chunk budget | 3,000 UTF-8 bytes; no overlap |
 | Scope | Enterprise ATT&CK; not the full Mobile or ICS datasets |
@@ -267,14 +274,25 @@ array elements, although indexed techniques currently have names and display cod
 
 ### 5.3. Safe source lookup
 
-Allow only these fixed dispatch paths. Bind `db_id` as a query parameter; do not build SQL table
-names from arbitrary payload or user text.
+Allow only these fixed dispatch paths; never build SQL table names from arbitrary payload or
+user text. For `query_sql`, insert the validated ID as an SQL literal and escape single quotes.
+There is no separate parameter-binding input on the tool. Direct database application code
+should instead bind the ID through its driver.
 
-| Valid payload source | PostgreSQL lookup |
+| Valid payload source | Fixed lookup target and ID type |
 | --- | --- |
-| `db_schema=attack`, `db_table=nodes` | `SELECT * FROM attack.nodes WHERE id = %s` |
-| `db_schema=attack`, `db_table=relationships` | `SELECT * FROM attack.relationships WHERE id = %s` |
-| `db_schema=attack`, `db_table=behavior_examples` | `SELECT * FROM attack.behavior_examples WHERE id = %s` with a validated BIGINT parameter |
+| `db_schema=attack`, `db_table=nodes` | `attack.nodes.id`, TEXT STIX ID |
+| `db_schema=attack`, `db_table=relationships` | `attack.relationships.id`, TEXT relationship STIX ID |
+| `db_schema=attack`, `db_table=behavior_examples` | `attack.behavior_examples.id`, validated BIGINT |
+
+Complete `query_sql` example for a known source node:
+
+~~~json
+{
+  "query": "SELECT * FROM attack.nodes WHERE id = 'attack-pattern--970a3432-3237-47ad-bcca-7d8cbb217736'",
+  "limit": 1
+}
+~~~
 
 Check the returned row's type and related IDs. A `linked_analytics` strategy hit additionally
 requires the analytic row named by `context_analytic_ids`; its strategy row has no description.
@@ -318,10 +336,12 @@ require their own active status. An active node may still have no active techniq
 
 Use these policies:
 
-- **Current, technique-scoped answer:** `is_active=true` AND matching `active_technique_ids`.
+- **Current, technique-scoped answer:** `filters.is_active=true` and the resolved display codes in
+  `filters.technique_attack_ids`; verify active edges and endpoints with SQL.
 - **Current, general node explanation:** `is_active=true`; do not require a technique link if the
   question does not require one.
-- **Historical or all-records question:** omit `is_active` and use `technique_ids` for links.
+- **Historical or all-records question:** explicitly set `filters.is_active=null`. Omission defaults
+  to active-only. Use `filters.technique_attack_ids` if a technique scope is requested.
 - **Only inactive points:** `is_active=false`. This means inactive, not specifically “revoked.”
   For revoked versus deprecated distinctions, inspect the exact PostgreSQL flags.
 
@@ -336,21 +356,21 @@ Suggested wording is a guide; do not make a hard platform/tactic filter from an 
 
 | User intent and example | Search type(s) / primary route | Required follow-up |
 | --- | --- | --- |
-| Identify behavior: «این اجرای دستور رمزگذاری‌شده با پاورشل چه تکنیکی است؟» | `behavior_example`, `attack-pattern` | Group by technique, inspect the technique description, return candidates with evidence |
+| Identify behavior: "Which technique fits encoded PowerShell command execution?" | `behavior_example`, `attack-pattern` | Group by technique, inspect the technique description, return candidates with evidence |
 | Explain a technique: “What does T1059.001 mean?” | PostgreSQL exact lookup; `attack-pattern` only if ranking related text is useful | Include direct tactics and parent when relevant |
 | Find realistic examples: “Show behavior examples for PowerShell.” | `behavior_example`, constrained to the resolved technique | Do not infer source actor identity |
-| Technique-specific mitigation: «چطور با این تکنیک مقابله کنیم؟» | Resolve technique, then `mitigates`; optionally `course-of-action` | Read edge guidance; fetch mitigation node for general context |
+| Technique-specific mitigation: "How can we mitigate this technique?" | Resolve technique, then `mitigates`; optionally `course-of-action` | Read edge guidance; fetch mitigation node for general context |
 | General mitigation explanation: “What is execution prevention?” | `course-of-action` | Resolve an exact M-code with `attack.mitigations` when supplied |
-| Detection overview: «چطور این رفتار را تشخیص بدهیم؟» | `x-mitre-detection-strategy`, optionally `x-mitre-analytic` | Follow `detects`; preserve analytic provenance |
+| Detection overview: "How can we detect this behavior?" | `x-mitre-detection-strategy`, optionally `x-mitre-analytic` | Follow `detects`; preserve analytic provenance |
 | Concrete monitoring logic: “What signals detect encoded PowerShell?” | `x-mitre-analytic`, optionally strategy evidence | Read analytic description, own platforms, log metadata and tuning fields |
 | Exact log or component: “Which analytics use Event ID 4104 / DC0064?” | PostgreSQL first | Resolve log-source/component membership; semantic ranking is optional within the eligible set |
-| Tactic scope: «تکنیک‌های Persistence در Windows» | PostgreSQL resolves eligible techniques; then `attack-pattern` if semantic ranking is needed | Match tactic and platform on the same technique |
+| Tactic scope: "Persistence techniques on Windows" | PostgreSQL resolves eligible techniques; then `attack-pattern` if semantic ranking is needed | Match tactic and platform on the same technique |
 | Parent/children: “List sub-techniques of T1059.” | PostgreSQL `subtechnique-of` | Do not use semantic top-k as a complete child list |
 | Complete coverage or count: “All mitigations for T1059.001” | PostgreSQL joins / `COUNT(DISTINCT ...)` | Do not count chunks or use top-k as an exhaustive result |
 | Old/deprecated code: “What replaced T1002?” | PostgreSQL and `revoked-by` | Inspect statuses without active-only filtering |
 | Similar techniques: “What techniques resemble this one?” | `attack-pattern` semantic candidates | State whether the answer means semantic similarity or a specific graph relation |
 | Attribution: “Which group used this?” | Unsupported as a structured query in this dataset | Explain that actor nodes and original links were removed |
-| Mixed: «این رفتار چیه و چطور جلوش رو بگیریم؟» | First identify technique; then a separate mitigation search | Do not answer the defense part from behavior examples alone |
+| Mixed: "What is this behavior and how can we prevent it?" | First identify technique; then a separate mitigation search | Do not answer the defense part from behavior examples alone |
 
 An exact list can be fully answered by PostgreSQL without paying for a query embedding.
 If the technique is uncertain, keep several candidates or ask a focused question before selecting
@@ -358,9 +378,11 @@ technique-specific guidance. Do not turn the first nearest neighbor into a confi
 
 ## 8. Filters that work on the current collection
 
-### 8.1. Direct-filter allowlist
+### 8.1. Storage indexes versus tool filters
 
-The collection has strict filtering enabled and these payload indexes:
+The current tool accepts only `filters.is_active`, `filters.types`, `filters.technique_attack_ids`,
+and `filters.platforms`. The collection has the following internal payload indexes; this larger
+storage list is NOT the tool's input allowlist:
 
 | Indexed field | Index type | Correct use |
 | --- | --- | --- |
@@ -392,17 +414,18 @@ Do **not** directly filter these on the current collection:
 | Desired constraint | Field exists, but is not indexed | Current safe route |
 | --- | --- | --- |
 | Tactic | `related_tactic_ids`, `related_tactic_attack_ids` | PostgreSQL tactic → eligible technique IDs → indexed technique filter |
-| Own node code | `attack_id` | Typed PostgreSQL lookup → `db_table=nodes` plus `db_id` |
+| Own node code | `attack_id` | Typed PostgreSQL lookup; read the source directly |
 | Technique/sub-technique only | `is_subtechnique` | SQL `attack.techniques.is_subtechnique` → eligible IDs |
 | Parent scope | `parent_id`, `parent_attack_id` | Explicit SQL hierarchy expansion → eligible IDs |
 | Analytic's own platform | `platforms` | SQL analytic JSON platform check; or inspect returned candidates with pagination |
-| One mitigation endpoint | `source_id`, `source_attack_id` | SQL resolves `mitigates` relationship IDs → `db_table=relationships` plus `db_id` |
+| One mitigation endpoint | `source_id`, `source_attack_id` | SQL resolves and reads the eligible `mitigates` relationships |
 | Strategy/analytic/component relation | `strategy_ids`, `analytic_ids`, `context_analytic_ids`, `data_component_ids` | SQL junctions → eligible source row IDs |
 | Log source, channel, tuning field | `log_sources`, `mutable_elements` | SQL JSON/view query; do not invent a nested Qdrant filter |
 | Specific revoked/deprecated condition | `revoked`, `deprecated`, endpoint flags | SQL checks the relevant source and endpoint statuses |
 | Exact citation/date/text condition | `source_urls`, `created`, `modified`, `text` | SQL original fields/JSON; no full-text payload index exists |
 
-All fields not in the direct allowlist are payload-only for this contract. Adding a new payload
+All fields not in the storage index list are payload-only for native filtering. Even indexed fields
+are unavailable to `search_attack` unless mapped to one of its four simple filter fields. Adding a new payload
 index is a future service/index migration, not something the orchestrator may perform during a query.
 If a required PostgreSQL resolver is unavailable, report the unsupported constraint; do not silently
 drop it. A rejected unindexed filter is not an empty search result.
@@ -414,9 +437,10 @@ Its union payload contains both Windows and that tactic even if neither techniqu
 The same issue affects a technique-code filter combined with inherited platform context.
 
 For strict conditions, first compute eligible techniques in PostgreSQL with **all conditions
-applied to the same technique row**. Then use one `active_technique_ids` condition for current
-guidance, or `technique_ids` for all-status links. In the answer, report the matched eligible
-techniques, not every technique listed in the payload.
+applied to the same technique row**. Then use the returned display codes in
+`filters.technique_attack_ids` and verify relevant paths through SQL. This filter alone does not
+prove an active path. In the answer, report only the matched eligible techniques, not every
+technique listed in the payload.
 
 ### 8.4. Detection platform and text provenance
 
@@ -427,7 +451,9 @@ Filtering `related_platforms=Windows` does not guarantee Windows-specific analyt
 For an analytic point, validate that analytic's own platforms. For a derived strategy point,
 validate the exact source in `context_analytic_ids`, not just any member of `analytic_ids`.
 With the current indexes, analytic points are often the simpler route for strict platform-specific
-detection questions: resolve analytic IDs in PostgreSQL, then filter `db_id` and type.
+detection questions: resolve and read eligible analytic IDs in PostgreSQL. If text ranking is useful,
+search `types=["x-mitre-analytic"]` with the supported scope and verify each returned `db_id`
+against that SQL result. `db_id` is not an accepted search filter.
 If filtering candidates after retrieval, continue paging/overfetching; do not call a rejected first
 page an exhaustive absence. Missing platform metadata means unknown applicability, not “all platforms.”
 
@@ -440,113 +466,109 @@ Tactic membership is also direct; do not inherit the parent's tactics automatica
 Mitigation and detection links are not automatically inherited between parent and child either.
 Report which exact technique each retrieved edge belongs to.
 
-## 9. Valid Qdrant filter examples
+## 9. Complete current tool-call examples
 
-These JSON objects are **filter objects**, not complete HTTP requests or implemented tool calls.
-Attach them as the `filter` field of a Qdrant request, or parse them as a client `Filter`.
-Add the verified `dataset_snapshot` condition at the service boundary when pinning a snapshot.
+F1-F3 and F6 call `search_attack`. F4-F5 call `query_sql`.
+Do not send native Qdrant filters or use a scroll tool; neither is exposed to the new agent.
 
 ### F1 — Identify a behavior
 
-Query: “Attackers run encoded commands using PowerShell.”
-
-```json
+~~~json
 {
-  "must": [
-    {"key": "is_active", "match": {"value": true}},
-    {"key": "type", "match": {"any": ["attack-pattern", "behavior_example"]}}
-  ]
+  "mode": "hybrid",
+  "query": "Attackers run encoded commands using PowerShell",
+  "lexical_query": "PowerShell EncodedCommand",
+  "weights": {"semantic": 0.7, "lexical": 0.3},
+  "filters": {"types": ["attack-pattern", "behavior_example"]},
+  "limit": 10
 }
-```
+~~~
 
-Do not add a technique filter before identifying candidate techniques. A platform can be added
-when it is an explicit, reliable requirement. Keep technical strings in the semantic query.
+Do not preselect a technique before examining candidates. The LLM may choose semantic or
+lexical instead, or change the hybrid weights to match the user's intent.
 
 ### F2 — Current mitigation guidance for PowerShell
 
-First resolve `T1059.001` to its STIX ID in PostgreSQL.
-
-```json
+~~~json
 {
-  "must": [
-    {"key": "is_active", "match": {"value": true}},
-    {"key": "type", "match": {"value": "mitigates"}},
-    {"key": "active_technique_ids", "match": {"value": "attack-pattern--970a3432-3237-47ad-bcca-7d8cbb217736"}}
-  ]
+  "mode": "semantic",
+  "query": "Prevent or restrict abuse of PowerShell",
+  "filters": {"types": ["mitigates"], "technique_attack_ids": ["T1059.001"]},
+  "limit": 10
 }
-```
+~~~
 
-This ranks technique-specific guidance. For **all** mitigations, use SQL instead of a top-k search.
+This ranks guidance. Use S4 for all mitigations and current edge/endpoint verification.
 
 ### F3 — Current detection evidence for PowerShell
 
-```json
+~~~json
 {
-  "must": [
-    {"key": "is_active", "match": {"value": true}},
-    {"key": "type", "match": {"any": ["x-mitre-detection-strategy", "x-mitre-analytic"]}},
-    {"key": "active_technique_ids", "match": {"value": "attack-pattern--970a3432-3237-47ad-bcca-7d8cbb217736"}}
-  ]
+  "mode": "hybrid",
+  "query": "Detect encoded PowerShell execution and script content",
+  "lexical_query": "PowerShell EncodedCommand 4104",
+  "weights": {"semantic": 0.3, "lexical": 0.7},
+  "filters": {
+    "types": ["x-mitre-detection-strategy", "x-mitre-analytic"],
+    "technique_attack_ids": ["T1059.001"]
+  },
+  "limit": 10
 }
-```
+~~~
 
-Keep strategy and analytic provenance. Matching both can reflect the same analytic text.
+Verify active graph paths and analytic applicability with SQL. Keep strategy/analytic provenance;
+both hits can reflect the same source text. BM25 keywords do not prove exact log metadata.
 
 ### F4 — An exact technique, including historical status
 
-```json
+~~~json
 {
-  "must": [
-    {"key": "type", "match": {"value": "attack-pattern"}},
-    {"key": "technique_attack_ids", "match": {"value": "T1059.001"}}
-  ]
+  "query": "SELECT id, attack_id, name, description, revoked, deprecated FROM attack.techniques WHERE attack_id = 'T1059.001'",
+  "limit": 10
 }
-```
+~~~
 
-Without the `type` condition this would return all categories of linked evidence, not just the
-technique. Use a PostgreSQL lookup or Qdrant scroll if no semantic ranking is needed.
+An exact lookup does not need an embedding. To include historical points in a text search,
+explicitly send `filters.is_active=null`; omitting it searches active points only.
 
-### F5 — Fetch all chunks for a resolved analytic
+### F5 — Fetch the source of a resolved analytic
 
-```json
+~~~json
 {
-  "must": [
-    {"key": "db_table", "match": {"value": "nodes"}},
-    {"key": "db_id", "match": {"value": "x-mitre-analytic--78864416-9ea3-4285-aab4-ecf31c935253"}},
-    {"key": "type", "match": {"value": "x-mitre-analytic"}}
-  ]
+  "query": "SELECT id, attack_id, name, description, revoked, deprecated FROM attack.analytics WHERE id = 'x-mitre-analytic--78864416-9ea3-4285-aab4-ecf31c935253'",
+  "limit": 10
 }
-```
+~~~
 
-Scroll through all pages with this filter to retrieve chunks without embedding a query.
-Sort the collected chunks by `chunk_index`.
-This lookup alone does not assert active status; inspect it or add `is_active=true` as required.
+This returns the original source description, not an exhaustive list of Qdrant chunks.
+Inspect status as required. The current tools expose neither Qdrant scroll nor a db_id search filter.
 
 ### F6 — Search Windows technique descriptions
 
-```json
+~~~json
 {
-  "must": [
-    {"key": "is_active", "match": {"value": true}},
-    {"key": "type", "match": {"value": "attack-pattern"}},
-    {"key": "related_platforms", "match": {"value": "Windows"}}
-  ]
+  "mode": "lexical",
+  "query": "PowerShell",
+  "filters": {"types": ["attack-pattern"], "platforms": ["Windows"]},
+  "limit": 10
 }
-```
+~~~
 
-This direct platform filter is precise here because a technique point links only to itself.
-Do not extend that guarantee to a mitigation or a platform-specific analytic.
+A technique point links only to itself, so the inherited platform context is precise here.
+Do not extend that guarantee to mitigations or platform-specific analytics.
 
-For a resolved list of eligible techniques, replace the single-ID match in F2/F3 with
-`match.any` containing their STIX IDs. If the eligible list is empty, return no matches;
-**never remove the scope filter and run a global search**. For very large lists, batch within
-service limits and merge/deduplicate, or answer the structural part in PostgreSQL.
+For a SQL-resolved technique set, use display codes in `filters.technique_attack_ids` (at most
+100 codes per call). If the eligible list is empty, report no eligible records; never remove
+the scope filter and run a global search. For larger sets, answer structural questions with SQL;
+separate search batches are not an exact global ranking.
 
 ## 10. PostgreSQL resolver recipes
 
-These are parameterized, read-only PostgreSQL queries. `%s` is the psycopg binding placeholder;
-it is not string interpolation. Always use schema-qualified names. Views include inactive records
-unless the query explicitly excludes them. Run related resolver steps in a consistent source snapshot.
+These are read-only SQL strings with concrete example values. Send each SQL block as the `query`
+field of `query_sql`, with a suitable `limit`. The tool has no separate parameters field; do not
+send unresolved placeholders. When adapting values, use SQL literals and double embedded single
+quotes. Application developers using psycopg directly should bind values with driver parameters.
+Views include inactive records unless explicitly filtered. Keep related steps in one source snapshot.
 
 ### S1 — Resolve an exact technique code
 
@@ -555,7 +577,7 @@ Parameters: `["T1059.001"]`. No status filter is intentional.
 ```sql
 SELECT id, attack_id, name, is_subtechnique, revoked, deprecated
 FROM attack.techniques
-WHERE attack_id = %s;
+WHERE attack_id = 'T1059.001';
 ```
 
 For `M`, `DET`, `AN`, `TA`, and `DC` codes, use the appropriate fixed typed view. Do not guess a
@@ -570,14 +592,15 @@ SELECT DISTINCT t.id, t.attack_id, t.name
 FROM attack.techniques AS t
 JOIN attack.technique_tactics AS tt ON tt.technique_id = t.id
 JOIN attack.tactics AS ta ON ta.id = tt.tactic_id
-WHERE ta.attack_id = %s
+WHERE ta.attack_id = 'TA0003'
   AND NOT ta.revoked AND NOT ta.deprecated
   AND NOT t.revoked AND NOT t.deprecated
-  AND COALESCE(t.stix_json->'x_mitre_platforms', '[]'::jsonb) ? %s
+  AND COALESCE(t.stix_json->'x_mitre_platforms', '[]'::jsonb) ? 'Windows'
 ORDER BY t.attack_id;
 ```
 
-Use the returned `id` values in `active_technique_ids`, together with the requested evidence type.
+Use returned `attack_id` values in `filters.technique_attack_ids` and select `filters.types`.
+Verify current graph paths through SQL; the simple code filter does not enforce active paths.
 Resolve tactic names/shortnames against `attack.tactics`; do not rely on an old hard-coded matrix.
 For example, this snapshot has 15 tactics and uses names including Stealth and Defense Impairment.
 
@@ -591,7 +614,7 @@ FROM attack.relationships AS r
 JOIN attack.techniques AS child ON child.id = r.source_id
 JOIN attack.techniques AS parent ON parent.id = r.target_id
 WHERE r.relationship_type = 'subtechnique-of'
-  AND parent.attack_id = %s
+  AND parent.attack_id = 'T1059'
   AND NOT r.revoked AND NOT r.deprecated
   AND NOT child.revoked AND NOT child.deprecated
   AND NOT parent.revoked AND NOT parent.deprecated
@@ -613,15 +636,15 @@ FROM attack.relationships AS r
 JOIN attack.mitigations AS m ON m.id = r.source_id
 JOIN attack.techniques AS t ON t.id = r.target_id
 WHERE r.relationship_type = 'mitigates'
-  AND t.attack_id = %s
+  AND t.attack_id = 'T1059.001'
   AND NOT r.revoked AND NOT r.deprecated
   AND NOT m.revoked AND NOT m.deprecated
   AND NOT t.revoked AND NOT t.deprecated
 ORDER BY m.attack_id, r.id;
 ```
 
-Use `relationship_id` to constrain `mitigates` points by `db_id` if ranking these descriptions
-is useful. Count distinct `mitigation_id` values for a mitigation count, not joined rows or chunks.
+Use returned `relationship_id` values to verify any ranked `mitigates` evidence. The simple tool
+does not accept a `db_id` filter; the SQL result already supplies the full guidance. Count distinct `mitigation_id` values for a mitigation count, not joined rows or chunks.
 
 ### S5 — Current detection analytics for a technique and analytic-native platform
 
@@ -637,16 +660,17 @@ JOIN attack.detection_strategies AS s ON s.id = r.source_id
 JOIN attack.strategy_analytics AS sa ON sa.strategy_id = s.id
 JOIN attack.analytics AS a ON a.id = sa.analytic_id
 WHERE r.relationship_type = 'detects'
-  AND t.attack_id = %s
+  AND t.attack_id = 'T1059.001'
   AND NOT r.revoked AND NOT r.deprecated
   AND NOT t.revoked AND NOT t.deprecated
   AND NOT s.revoked AND NOT s.deprecated
   AND NOT a.revoked AND NOT a.deprecated
-  AND COALESCE(a.stix_json->'x_mitre_platforms', '[]'::jsonb) ? %s
+  AND COALESCE(a.stix_json->'x_mitre_platforms', '[]'::jsonb) ? 'Windows'
 ORDER BY s.attack_id, a.attack_id;
 ```
 
-Use `analytic_id` values with `type=x-mitre-analytic`, `db_table=nodes`, and `db_id` match-any.
+Use `analytic_id` values to verify returned analytic points by their payload `db_id`.
+Do not send these source IDs as search filters; answer directly from SQL if ranking is unnecessary.
 If using strategy points instead, check each chunk's `context_analytic_ids` against this eligible
 analytic set. A strategy-ID filter alone does not select the correct platform-specific chunk.
 
@@ -661,7 +685,7 @@ SELECT a.id AS analytic_id, a.attack_id AS analytic_attack_id,
 FROM attack.analytics AS a
 LEFT JOIN attack.analytic_log_sources AS ls ON ls.analytic_id = a.id
 LEFT JOIN attack.data_components AS dc ON dc.id = ls.data_component_id
-WHERE a.attack_id = %s
+WHERE a.attack_id = 'AN1252'
 ORDER BY dc.attack_id, ls.log_source, ls.channel;
 ```
 
@@ -676,7 +700,8 @@ is unnecessary. Apply active node filters when the question asks for current rec
 ### Query formatting
 
 Documents were embedded as `title: {title or 'none'} | text: {cleaned chunk}`.
-Use the same model and 3,072 dimensions for the query, with exactly one task prefix:
+Backend implementation detail only: semantic/hybrid use the same model and 3,072 dimensions,
+with exactly one task prefix. The LLM sends raw text; it never constructs these strings:
 
 ```text
 task: search result | query: {user behavior or search text}
@@ -694,7 +719,7 @@ Persian queries may remain Persian. Keep commands, filenames, event IDs, and ATT
 Do not set `language=fa`: the corpus label remains `en`, and that field is not indexed anyway.
 Do not embed a full conversation, API keys, or a filter JSON object as the semantic query.
 
-### Recommended retrieval sequence — future service behavior
+### Recommended retrieval sequence — orchestrator responsibility
 
 ```mermaid
 flowchart TD
@@ -702,8 +727,8 @@ flowchart TD
     I --> E{Exact list, count, or graph lookup?}
     E -->|Yes| SQL[Read-only PostgreSQL query]
     E -->|No| S[Resolve hard scope in PostgreSQL if needed]
-    S --> F[Validate type and indexed filters]
-    F --> V[Embed query and search pinned Qdrant collection]
+    S --> F[Choose mode, simple filters, and hybrid weights]
+    F --> V[Call search_attack; backend handles retrieval]
     V --> G[Group evidence and verify PostgreSQL links]
     SQL --> A[Answer with scope and sources]
     G --> A
@@ -711,8 +736,11 @@ flowchart TD
 
 For behavior identification, separate small searches for techniques and examples can help prevent
 17,136 example points from taking every result slot. This is a recommended retrieval policy, not
-an existing multi-search/reranking implementation. The collection currently has no sparse vector,
-hybrid search, or reranker.
+an automatic grouping policy. The current tool supports semantic, lexical BM25 and hybrid modes.
+Hybrid performs both searches in Qdrant and fuses their rankings in the backend using
+`sum(weight / (60 + rank))`, with one-based ranks, normalized LLM weights, and identical filters.
+No learned reranker is included. Lexical uses English title/chunk tokens; for Persian behavior
+queries, the LLM can supply an English `lexical_query` alongside the semantic `query`.
 
 - Group chunks by `document_id`; retain the best matching text and source references.
 - For behavior identification, group by matched technique ID as well. Many examples for one
@@ -725,18 +753,20 @@ hybrid search, or reranker.
   still have different relationships or provenance.
 - Treat `title_only` as limited evidence. Fetch the source, and do not expand a short title into
   an unsupported detailed explanation.
-- Scores rank text similarity. There is no validated universal threshold in this project.
+- Scores rank retrieval evidence (cosine, BM25, or weighted RRF depending on mode).
+  There is no validated universal threshold in this project.
   Calibrate thresholds with a labeled evaluation set; do not invent a confidence percentage.
 - Preserve explicit filters on empty results. You may offer a broader search, but explain the
   changed scope rather than silently including inactive or unrelated records.
 
-For the future tool response, return at least: point ID, score, `type`, `document_id`,
+For answer provenance, retain these existing response/payload fields: point ID, score, `type`, `document_id`,
 `db_schema`, `db_table`, `db_id`, `dataset_snapshot`, `title`, `text`, `text_origin`, chunk position,
-matched technique IDs/codes, status, relevant provenance, and source references. Keep raw vectors
-and secrets out of orchestrator responses. “Matched techniques” is a proposed response field
-computed by the service; it is not an existing Qdrant payload field.
+related technique IDs/codes, status, relevant provenance, and source references. Keep raw vectors
+and secrets out of answers. Determine which related techniques actually match the question through
+evidence and SQL verification; there is no backend-computed “matched techniques” field.
 
-The semantic tool accepts text and validated filters, not collection names or Qdrant administration
+The primary `search_attack` tool accepts text, mode, optional hybrid weights, and simple validated
+filters. The legacy semantic endpoint accepts native validated filters. Neither accepts collection names or Qdrant administration
 operations. A separate SQL tool accepts a guarded SELECT for a trusted orchestrator, with transaction,
 row and time limits. This is not a complete arbitrary-SQL sandbox: configure a restricted database
 role before public exposure. Prompt instructions alone do not enforce these boundaries. Current
@@ -745,7 +775,7 @@ section's higher-level retrieval recommendations.
 
 ## 12. Worked path: PowerShell
 
-Question: «اجرای دستورهای رمزگذاری‌شده با پاورشل چه تکنیکی است و چطور تشخیصش بدهیم؟»
+Question: "Which technique fits encoded PowerShell commands, and how can we detect it?"
 
 1. Identify candidate techniques with F1 and the behavior text. Do not preselect the technique
    solely because this example uses a familiar keyword.

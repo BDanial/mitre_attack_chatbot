@@ -1,13 +1,22 @@
-# ATT&CK Semantic Search — Project Report
+# ATT&CK Retrieval — Project Report
 
 **Review date:** 7 September 2026  
-**Stage:** Data and retrieval foundation  
+**Stage:** SQL and semantic/lexical/hybrid retrieval backend (v0.2)
+
 **Audience:** Technical reviewers and future maintainers
 
 > Implementation update — 8 September 2026: the two FastAPI search tools are now implemented
 > with API-key authentication. Public deployment and the Dify chatbot remain future work.
-> See the [API guide](api.md) for the current interface and security limits. The report below
-> records the earlier data-pipeline stage.
+> See the [API guide](api.md) for the current interface and security limits. This report describes
+> the data foundations, current retrieval backend, and separately dated earlier checks.
+
+> Version 0.2 implementation update: `search_attack` now supports semantic, lexical BM25 and
+> hybrid retrieval with LLM-selected weights and simple filters. The backend combines the two
+> Qdrant rankings using weighted reciprocal rank fusion. `index-lexical` upgrades the existing
+> collection additively without recomputing dense embeddings. See the [API guide](api.md),
+> [operations](operations.md), and [LLM guide](orchestrator/llm-tool-guide.md).
+> The historical verification section retains its original review results; current capabilities
+> and remaining deployment work are described separately below.
 
 ## Purpose
 
@@ -18,10 +27,16 @@ description to the right technique, its detection guidance, and its mitigations.
 The source is MITRE Enterprise ATT&CK in STIX format. MITRE also uses STIX data to build its
 website and other data views. [MITRE data reference](https://attack.mitre.org/resources/attack-data-and-tools/)
 
+This report provides design and dated verification context. For tool calls, follow the
+[documentation map](README.md), [LLM guide](orchestrator/llm-tool-guide.md), and [API contract](api.md).
+Dated counts and earlier results are not live answers to user questions.
+
 ## What works today
 
 The project downloads and filters ATT&CK data, stores its relationships in PostgreSQL, and creates
-a semantic index in Qdrant. It uses Google Gemini Embedding 2 through OpenRouter. The command-line
+dense semantic and sparse BM25 indexes in Qdrant. It uses Google Gemini Embedding 2 through
+OpenRouter for dense vectors and native Qdrant BM25 for lexical retrieval. FastAPI exposes
+`query_sql` and `search_attack`; the LLM chooses mode and relative hybrid weights. The command-line
 tools support progress output, sample runs, and resume after a failed upload.
 
 Group, campaign, malware, and tool nodes are removed from the graph. Before this step, the code
@@ -37,13 +52,15 @@ flowchart LR
     P --> C[Clean text and build chunks]
     C --> E[OpenRouter: Gemini embeddings]
     E --> Q[(Qdrant: vectors and metadata)]
-    D[Dify chatbot: planned] -. tools .-> F[FastAPI: planned]
-    F -. semantic search .-> Q
-    F -. source details .-> P
-    F -. query embedding .-> E
+    C --> B25[Native BM25]
+    B25 --> Q
+    D[Dify chatbot: planned] -. tools .-> F[FastAPI tools]
+    F -->|Semantic / lexical / hybrid| Q
+    F -->|Read-only SQL| P
+    F -->|Semantic or hybrid query embedding| E
 ```
 
-*Solid arrows show the current data pipeline. Dashed arrows show the planned application.*
+*Solid arrows show implemented backend paths. The dashed Dify integration remains planned.*
 
 PostgreSQL is the main source of truth. Qdrant helps find relevant text. Every point carries its
 type, source table, database ID, and related technique IDs. This makes it possible to return from
@@ -65,7 +82,10 @@ Each index belongs to a specific source snapshot and embedding profile. A comple
 published through the alias `attack_semantic`. This helps prevent an unfinished upload from
 becoming the normal search target. PostgreSQL and Qdrant still need a coordinated refresh.
 
-## Results and checks
+## Historical data-pipeline checks (7 September 2026)
+
+These results describe the original pipeline review. The v0.2 upgrade subsequently passed
+225 offline tests and live SQL/semantic/lexical/hybrid smoke checks; see [API verification](api.md#6-tests).
 
 | Measure | Verified result |
 | --- | ---: |
@@ -87,20 +107,16 @@ upload, a Qdrant 507 error stopped one run. A later run completed from the saved
 
 ## Next stages
 
-First, add FastAPI routes for semantic search and technique details. Keep request validation
-in the API layer and retrieval logic in services. FastAPI supports separate route modules through
-`APIRouter`. [FastAPI structure guide](https://fastapi.tiangolo.com/tutorial/bigger-applications/)
+FastAPI authentication, request validation, guarded read-only SQL, limits, timeouts, and the
+three search modes are implemented. Public hosting and a configured Dify chatbot remain separate
+work. Connect Dify using the current OpenAPI operation IDs `query_sql` and `search_attack`;
+see [API and Dify setup](api.md).
 
-Next, connect Dify to these endpoints as tools. Use a stable OpenAPI contract with clear operation
-names. Dify's custom-tool interface uses OpenAPI operation IDs. The chatbot can then search,
-read source details, and prepare an answer with references.
-[Dify tool documentation](https://docs.dify.ai/en/develop-plugin/features-and-specs/advanced-development/reverse-invocation-tool)
-
-The public API and chatbot are not implemented yet. Before public use, add authentication,
-request limits, timeouts, and tests with realistic English and Persian queries. If text-to-SQL
-is added, use a read-only database role and validate SQL before execution. The current database
-stores one snapshot, and behavior IDs can change after an import; the API must check snapshot
-compatibility when it reads source records.
+Before public exposure, configure a least-privilege database role, HTTPS, rate/concurrency limits,
+and deployment-level request/response limits. Evaluate realistic multilingual questions and
+retrieval quality; existing smoke checks are not a benchmark. The database stores one snapshot,
+and behavior IDs can change after an import. Coordinate refreshes before joining search results
+to source rows; see [operations](operations.md#refresh-a-published-snapshot).
 
 ## Appendices
 

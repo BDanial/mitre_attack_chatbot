@@ -11,12 +11,22 @@ from pydantic import ValidationError
 from qdrant_client import models
 
 from attack_search.embeddings.client import create_embedding_client, embed_query
+from attack_search.embeddings.lexical import LEXICAL_VECTOR, bm25_document
 from attack_search.embeddings.profile import ALIAS, DIMENSIONS
-from attack_search.storage.qdrant import KEYWORD_FIELDS, create_qdrant_client
+from attack_search.search_contract import SearchRequest
+from attack_search.storage.qdrant import (
+    KEYWORD_FIELDS,
+    create_qdrant_client,
+    ensure_lexical_ready,
+)
 
 
 class SearchInputError(ValueError):
     """A safe validation message that may be returned to a tool caller."""
+
+
+class SearchUnavailableError(RuntimeError):
+    """A known missing index, distinct from an empty search or upstream failure."""
 
 
 class _SelectOnly(Visitor):
@@ -157,3 +167,115 @@ def semantic_search(
         "limit": limit,
         "offset": offset,
     }
+
+
+def search_attack(request: SearchRequest) -> dict:
+    """Choose one retrieval mode; build all Qdrant queries inside the service."""
+    # Revalidate even direct service calls, before opening either remote client.
+    request = SearchRequest.model_validate(request.model_dump())
+    query_filter = _validate_filter(request.filters.to_qdrant_filter())
+    weights = request.weights.normalized() if request.weights else None
+    with closing(create_qdrant_client()) as qdrant:
+        collection = next(
+            (a.collection_name for a in qdrant.get_aliases().aliases if a.alias_name == ALIAS), None
+        )
+        if collection is None:
+            raise SearchUnavailableError("Published search collection is unavailable")
+        info = qdrant.get_collection(collection)
+        vectors = info.config.params.vectors
+        if not isinstance(vectors, models.VectorParams) or (
+            vectors.size != DIMENSIONS or vectors.distance != models.Distance.COSINE
+        ):
+            raise SearchUnavailableError("Published vector configuration is incompatible")
+        if request.mode != "semantic":
+            try:
+                ensure_lexical_ready(qdrant, collection, info=info)
+            except ValueError as exc:
+                raise SearchUnavailableError(
+                    "Lexical index is unavailable or incomplete; run attack-search index-lexical"
+                ) from exc
+
+        arguments = {
+            "collection_name": collection,
+            "query_filter": query_filter,
+            "limit": request.limit,
+            "offset": request.offset,
+            "with_payload": True,
+            "with_vectors": False,
+            "timeout": 10,
+        }
+        if request.mode != "lexical":
+            with create_embedding_client() as client:
+                dense = embed_query(
+                    client, request.query, question_answering=request.question_answering
+                )
+        if request.mode != "semantic":
+            sparse = bm25_document(request.lexical_query or request.query)
+
+        if request.mode == "semantic":
+            arguments["query"] = dense
+        elif request.mode == "lexical":
+            arguments.update(query=sparse, using=LEXICAL_VECTOR)
+        else:
+            candidates = max(100, request.offset + request.limit)
+            ranked = qdrant.query_batch_points(
+                collection_name=collection,
+                requests=[
+                    models.QueryRequest(
+                        query=dense,
+                        filter=query_filter,
+                        limit=candidates,
+                        with_payload=True,
+                        with_vector=False,
+                    ),
+                    models.QueryRequest(
+                        query=sparse,
+                        using=LEXICAL_VECTOR,
+                        filter=query_filter,
+                        limit=candidates,
+                        with_payload=True,
+                        with_vector=False,
+                    ),
+                ],
+                timeout=10,
+            )
+            if len(ranked) != 2:
+                raise RuntimeError("Hybrid search requires both retrieval responses")
+            points = weighted_rrf(ranked, [weights["semantic"], weights["lexical"]])
+            points = points[request.offset : request.offset + request.limit]
+        if request.mode != "hybrid":
+            result = qdrant.query_points(**arguments)
+            points = [
+                {"id": str(point.id), "score": point.score, "payload": point.payload}
+                for point in result.points
+            ]
+    return {
+        "collection": collection,
+        "points": points,
+        "limit": request.limit,
+        "offset": request.offset,
+        "mode": request.mode,
+        "score_kind": {"semantic": "cosine", "lexical": "bm25", "hybrid": "weighted_rrf"}[
+            request.mode
+        ],
+        "weights": weights,
+    }
+
+
+def weighted_rrf(ranked: list, weights: list[float]) -> list[dict]:
+    """Fuse Qdrant rankings as sum(weight / (60 + one-based rank)).
+
+    Apply coefficients to reciprocal ranks directly. Qdrant's native weighted
+    RRF rescales ranks inside the denominator, which has different semantics.
+    """
+    fused = {}
+    for response, weight in zip(ranked, weights):
+        seen = set()
+        for rank, point in enumerate(response.points, start=1):
+            key = str(point.id)
+            if key in seen:
+                continue
+            seen.add(key)
+            item = fused.setdefault(key, {"id": key, "score": 0.0, "payload": point.payload})
+            item["score"] += weight / (60 + rank)
+    return sorted(fused.values(), key=lambda item: (-item["score"], item["id"]))

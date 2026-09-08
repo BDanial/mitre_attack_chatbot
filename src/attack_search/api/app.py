@@ -5,19 +5,29 @@ import secrets
 from typing import Annotated
 
 import psycopg
-from fastapi import Depends, FastAPI, HTTPException, Request, Security
+from fastapi import Body, Depends, FastAPI, HTTPException, Request, Security
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
 from qdrant_client.http.exceptions import UnexpectedResponse
 
+from attack_search import __version__
 from attack_search.api.models import (
+    SearchRequest,
+    SearchResponse,
     SemanticRequest,
     SemanticResponse,
     SQLRequest,
     SQLResponse,
 )
 from attack_search.config import load_environment
-from attack_search.services.search import SearchInputError, query_sql, semantic_search
+from attack_search.search_contract import SEARCH_EXAMPLES
+from attack_search.services.search import (
+    SearchInputError,
+    SearchUnavailableError,
+    query_sql,
+    search_attack,
+    semantic_search,
+)
 
 
 def create_app() -> FastAPI:
@@ -28,8 +38,8 @@ def create_app() -> FastAPI:
     database_url = os.environ.get("API_DATABASE_URL") or os.environ.get("DATABASE_URL")
     app = FastAPI(
         title="ATT&CK Search Tools",
-        version="0.1.0",
-        description="Read-only SQL and semantic search tools for Enterprise ATT&CK.",
+        version=__version__,
+        description="Read-only SQL and semantic, lexical or weighted hybrid search for Enterprise ATT&CK.",
         servers=[{"url": os.environ.get("API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")}],
     )
     key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -53,7 +63,34 @@ def create_app() -> FastAPI:
         return query_sql(body.query, database_url=database_url, limit=body.limit)
 
     @app.post(
+        "/tools/search",
+        operation_id="search_attack",
+        response_model=SearchResponse,
+        dependencies=[Depends(authenticate)],
+        summary="Search ATT&CK by meaning, keywords, or both",
+        description="Choose mode: semantic for meaning, lexical for English words/commands, hybrid "
+        "for both. Always send query. Hybrid requires weights, e.g. semantic=0.7, lexical=0.3; "
+        "optional lexical_query gives English keywords for a Persian query. Use simple filters "
+        "(types, technique_attack_ids, platforms, is_active); never write Qdrant syntax or vectors. "
+        "Omitted filters search active records. Results are evidence chunks, not complete lists. "
+        "Use query_sql for exact counts and graph relationships. Only semantic/hybrid calls OpenRouter.",
+    )
+    def search_tool(
+        body: Annotated[
+            SearchRequest,
+            Body(
+                openapi_examples={
+                    example["mode"]: {"summary": example["mode"], "value": example}
+                    for example in SEARCH_EXAMPLES
+                }
+            ),
+        ],
+    ):
+        return search_attack(body)
+
+    @app.post(
         "/tools/semantic-search",
+        include_in_schema=False,
         operation_id="semantic_search",
         response_model=SemanticResponse,
         dependencies=[Depends(authenticate)],
@@ -74,6 +111,16 @@ def create_app() -> FastAPI:
     @app.exception_handler(SearchInputError)
     async def invalid_query(request: Request, exc: SearchInputError):
         return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+    @app.exception_handler(SearchUnavailableError)
+    async def unavailable_index(request: Request, exc: SearchUnavailableError):
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": "Search index is unavailable or incompatible. Verify the published "
+                "index; run attack-search index-lexical for lexical/hybrid readiness."
+            },
+        )
 
     @app.exception_handler(psycopg.Error)
     async def database_error(request: Request, exc: psycopg.Error):

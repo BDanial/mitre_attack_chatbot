@@ -379,7 +379,7 @@ wheels = [
 
 [[package]]
 name = "mitre-attack-d-search"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
@@ -406,7 +406,7 @@ requires-dist = [
     { name = "pglast", specifier = ">=7,<8" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<4" },
     { name = "python-dotenv", specifier = ">=1,<2" },
-    { name = "qdrant-client", specifier = ">=1.17,<2" },
+    { name = "qdrant-client", specifier = ">=1.19,<2" },
     { name = "uvicorn", specifier = ">=0.30,<1" },
 ]
 

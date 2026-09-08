@@ -1,7 +1,7 @@
 [project]
 name = "mitre-attack-d-search"
-version = "0.1.0"
-description = "MITRE ATT&CK data preparation and semantic retrieval foundation"
+version = "0.2.0"
+description = "MITRE ATT&CK data preparation and semantic, lexical and hybrid retrieval"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -11,7 +11,7 @@ dependencies = [
     "pglast>=7,<8",
     "psycopg[binary]>=3.2,<4",
     "python-dotenv>=1,<2",
-    "qdrant-client>=1.17,<2",
+    "qdrant-client>=1.19,<2",
     "uvicorn>=0.30,<1",
 ]
 

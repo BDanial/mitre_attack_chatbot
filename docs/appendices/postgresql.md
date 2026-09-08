@@ -6,6 +6,11 @@ Catalog review: **2026-09-06**. Project layout and snapshot compatibility rechec
 [Back to the project report](../report.md) · [Qdrant schema](qdrant.md) ·
 [Orchestrator search guide](../orchestrator/semantic-search.md)
 
+**LLM scope:** this file defines SQL data and read-only recipes, not additional tool parameters.
+Send SQL as `query_sql` input: `{"query": "SELECT ...", "limit": 100}`. There is no separate
+`params` field; never send unresolved `%s` placeholders. See the [documentation map](../README.md)
+and [LLM tool guide](../orchestrator/llm-tool-guide.md).
+
 ## 1. Short Contract for a Text-to-SQL Model
 
 This section can be supplied to an SQL-generating model together with the user's question. Detailed definitions and examples follow.
@@ -391,7 +396,9 @@ This schema defines no JSONB GIN, trigram, full-text, or vector index. `ILIKE '%
 
 ## 13. Example Queries for Text-to-SQL
 
-The examples below use concrete values so they can run directly in an SQL editor. In application code, bind user-supplied values through driver parameters and choose table and column names from this schema. Psycopg uses `%s` for value parameters; do not concatenate user input into SQL.
+The examples below use concrete values so they can run directly in an SQL editor or be sent
+as a complete `query_sql.query` string. The following driver-binding advice applies only to
+application code, not to tool-call JSON. In application code, bind user-supplied values through driver parameters and choose table and column names from this schema. Psycopg uses `%s` for value parameters; do not concatenate user input into SQL.
 
 All examples are read-only. Each has a `Qxx` identifier so it can be independently extracted from this file and tested. Expected results apply only to the reviewed snapshot.
 
@@ -732,7 +739,7 @@ ORDER BY position;
 
 These are references for the technique itself. For a mitigation relationship's sources, read `external_references` from that relationship's `r.stix_json`; do not present technique references as sources for a relationship or behavior example.
 
-### Q19 — Lexical Search Across Technique Descriptions and Examples
+### Q19 — SQL Substring Search Across Technique Descriptions and Examples
 
 ```sql
 -- Q19
@@ -757,7 +764,10 @@ ORDER BY attack_id, chunk_type, source_record_id
 LIMIT 20;
 ```
 
-`texts` is a CTE scoped to this query, not a persistent table. This performs English text matching, not embedding retrieval. Each result represents one text; use DISTINCT on the technique identifier to list unique techniques.
+`texts` is a CTE scoped to this query, not a persistent table. This performs English substring
+matching, not BM25 ranking or embedding retrieval. Use `search_attack` with `mode="lexical"`
+for ranked token-based search. Each SQL result represents one text; use DISTINCT on the technique
+identifier to list unique techniques.
 
 ### Q20 — Techniques Whose Metadata Was Modified Within a Time Range
 

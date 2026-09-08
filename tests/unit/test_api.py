@@ -82,10 +82,10 @@ def test_sql_without_connection_configuration_returns_503(monkeypatch, configure
 
 def test_openapi_has_two_stable_tools_header_security_and_server(client):
     schema = client.get("/openapi.json").json()
-    assert set(schema["paths"]) == {"/tools/sql", "/tools/semantic-search"}
+    assert set(schema["paths"]) == {"/tools/sql", "/tools/search"}
     assert schema["servers"] == [{"url": "https://search.example.test"}]
     assert schema["paths"]["/tools/sql"]["post"]["operationId"] == "query_sql"
-    assert schema["paths"]["/tools/semantic-search"]["post"]["operationId"] == "semantic_search"
+    assert schema["paths"]["/tools/search"]["post"]["operationId"] == "search_attack"
     schemes = schema["components"]["securitySchemes"]
     for path in schema["paths"].values():
         security = path["post"]["security"]

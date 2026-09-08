@@ -1,11 +1,18 @@
 # Appendix B — Qdrant Storage Schema
 
 Reviewed against the indexer and the published ATT&CK 19.2 index on **7 September 2026**.
+The hybrid implementation adds the sparse profile described below; original dense and payload
+statistics retain their review date. Use `index-lexical` to upgrade an older semantic-only index.
 This is the application's payload contract. Qdrant accepts JSON payloads; it does not enforce
 SQL foreign keys or all the field rules below. The document builder supplies those rules.
 
 [Back to the report](../report.md) · [PostgreSQL reference](postgresql.md) · [Operations](../operations.md) ·
 [Orchestrator search guide](../orchestrator/semantic-search.md)
+
+**LLM scope:** this is an internal storage dictionary, not the search input schema.
+Call `search_attack` with simple filters only; never send vector configuration, collection names,
+or arbitrary payload keys. See the [documentation map](../README.md) and
+[LLM tool guide](../orchestrator/llm-tool-guide.md). Administrative operations are host-only.
 
 ## 1. Collection and vector configuration
 
@@ -15,7 +22,7 @@ SQL foreign keys or all the field rules below. The document builder supplies tho
 | Current physical collection | `attack_semantic_v1_1a8b0f1ed18b3c5cfd25` |
 | Embedding model | `google/gemini-embedding-2` |
 | Provider API | OpenRouter `/api/v1/embeddings` |
-| Vector representation | One unnamed dense vector per point |
+| Vector representation | One unnamed dense vector plus named sparse `lexical_bm25_v1` per point after upgrade |
 | Vector size | 3,072 numeric values |
 | Response encoding | `float` |
 | Distance | `Cosine` |
@@ -34,6 +41,9 @@ The unnamed vector configuration has this form:
     "size": 3072,
     "distance": "Cosine",
     "on_disk": true
+  },
+  "sparse_vectors": {
+    "lexical_bm25_v1": {"modifier": "idf"}
   }
 }
 ```
@@ -41,7 +51,29 @@ The unnamed vector configuration has this form:
 The reviewed server also reported `on_disk_payload=true`, one shard, replication factor 1,
 write consistency factor 1, HNSW `m=16`, `ef_construct=100`, and no quantization. These are observed
 server settings, not all explicit settings in the creation code. The code checks vector size and
-distance on resume. The index currently has no sparse vectors, named vectors, or hybrid ranking.
+distance on resume. The original dense vector remains unnamed. BM25 adds a named sparse vector;
+it does not change `PIPELINE_VERSION`, dense inputs, point UUIDs, or point payloads.
+
+### Lexical profile and readiness
+
+Qdrant server/client 1.19+ generates BM25 with model `Qdrant/bm25` from the nonempty `title`
+and `text` joined with a newline. Dense prompt labels and unrelated metadata are not included.
+The pinned options are `k=1.2`, `b=0.75`, `avg_len=256`, word tokenization, English Snowball
+stemming and stopwords, lowercase enabled, ASCII folding disabled. `avg_len` is a fixed profile
+parameter, not a measured average of this corpus. The same options apply to document and query.
+Word matching is not a guarantee of exact command punctuation, substring, phrase, or all terms.
+
+Collection metadata key `attack_search_lexical` records `profile`, `dataset_snapshot`, and
+`expected_points`. The profile includes the vector name, model, text fields and tokenizer options.
+It is separate from point payloads. Search checks that the sparse field uses IDF, the profile
+matches, the exact point count matches the manifest, and no points lack the sparse vector.
+An incomplete upgrade fails closed for lexical/hybrid. Dense search keeps its existing contract.
+
+Semantic mode returns cosine scores; lexical mode returns BM25 scores. Hybrid uses a batch
+query for both Qdrant rankings and backend weighted RRF: sum of `weight / (60 + rank)` with
+one-based ranks and normalized LLM weights. Missing branches contribute zero, ties use point ID,
+and pagination follows fusion. This is not a linear mixture of raw cosine/BM25 scores or
+Qdrant's native rank-rescaling weighted RRF. See the [API contract](../api.md) for candidate limits.
 
 Qdrant normalizes vectors for cosine comparison. Its HNSW indexed-vector count can be lower than
 the exact point count: other stored points can still be searched by a scan. Do not use the HNSW
@@ -49,7 +81,7 @@ count as an import-completeness check. [Qdrant collection reference](https://qdr
 
 ## 2. Point granularity and source mapping
 
-One point represents **one text chunk**, with one vector and one payload. A source row may have
+One point represents **one text chunk**, with dense/sparse representations and one payload. A source row may have
 multiple points. No database row is created for a chunk in PostgreSQL.
 
 | `payload.type` | PostgreSQL source | Source rows | Qdrant points |
@@ -323,22 +355,24 @@ and disallows filtering on unindexed fields; add a suitable index before using a
 In particular, `related_tactic_ids`, `related_tactic_attack_ids`, `platforms`, `attack_id`,
 `is_subtechnique`, `parent_id`, `source_id`, and analytic/component/log-source fields are
 **returned metadata, not direct-filter capabilities**. Resolve their constraints in PostgreSQL,
-then filter indexed source or technique IDs. The orchestrator guide explains the exact routes.
+then use supported technique-code filters or verify returned candidates through SQL.
+`search_attack` exposes only `is_active`, `types`, `technique_attack_ids`, and `platforms`
+inside `filters`; internal indexes do not extend that allowlist.
 
-Example filter for active technique and behavior points:
+Complete `search_attack` example for active technique and behavior points:
 
-```json
+~~~json
 {
-  "must": [
-    {"key": "is_active", "match": {"value": true}},
-    {"key": "type", "match": {"any": ["attack-pattern", "behavior_example"]}}
-  ]
+  "mode": "lexical",
+  "query": "PowerShell EncodedCommand",
+  "filters": {"types": ["attack-pattern", "behavior_example"]},
+  "limit": 10
 }
-```
+~~~
 
-For an exact ATT&CK code, use a payload filter or PostgreSQL lookup. Group multiple chunks by
-`document_id`. For behavior-to-technique retrieval, group results by technique so many examples
-of one technique do not fill the answer. A full serving layer for these policies is planned.
+For an exact ATT&CK code, use `query_sql`. Group multiple chunks by `document_id`.
+For behavior-to-technique retrieval, group results by technique so many examples of one
+technique do not fill the answer. Grouping is the orchestrator's responsibility, not automatic.
 
 ## 9. Publication, resume and validation
 
@@ -361,7 +395,7 @@ Implementation references: [document builder](../../src/attack_search/embeddings
 ## 10. Orchestrator handoff and live inspection
 
 The [orchestrator guide](../orchestrator/semantic-search.md) covers intent-to-type routing,
-relationship cardinalities, safe SQL resolution, valid Qdrant filter examples, active/historical
+relationship cardinalities, safe SQL resolution, complete current tool-call examples, active/historical
 policies, and the path from retrieved evidence back to PostgreSQL. Give that guide to the
 orchestrator; use this appendix as its detailed storage dictionary. The two FastAPI tools added
 on 8 September 2026 are described in the [API guide](../api.md); Dify configuration is still separate.
@@ -380,7 +414,7 @@ operations. It did not change either database or make an embedding request.
 | All point IDs and projected source metadata | 23,240 checked; zero missing, unexpected, or mismatched points |
 | Fields compared on every point | `type`, `db_table`, `db_id`, `document_id`, `dataset_snapshot`, `content_hash`, `is_active` |
 | Full payload samples | One per type, six total; all matched documents rebuilt from the current PostgreSQL snapshot |
-| Orchestrator examples | All six SQL recipes executed read-only; all six Qdrant filters passed live count requests using only indexed fields |
+| Historical orchestrator examples | The then-current six SQL recipes executed read-only; six native Qdrant filters passed live count checks. These were storage checks, not current tool-call examples |
 | Payload indexes | Exactly nine keyword indexes and one Boolean index, as in section 8 |
 | Strict-mode filtering | `enabled=true`, `unindexed_filtering_retrieve=false`, `unindexed_filtering_update=false` |
 

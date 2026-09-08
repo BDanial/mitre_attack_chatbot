@@ -1,9 +1,11 @@
 """Small request and response contracts, also used to generate OpenAPI."""
 
 import json
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from attack_search.search_contract import SearchRequest as SearchRequest
 
 
 class SQLRequest(BaseModel):
@@ -54,3 +56,9 @@ class SemanticResponse(BaseModel):
     points: list[SearchPoint]
     limit: int
     offset: int
+
+
+class SearchResponse(SemanticResponse):
+    mode: Literal["semantic", "lexical", "hybrid"]
+    score_kind: Literal["cosine", "bm25", "weighted_rrf"]
+    weights: dict[str, float] | None

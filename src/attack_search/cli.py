@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from attack_search.config import get_data_directory, get_database_url, load_environment, safe_error
-from attack_search.services.indexing import run_index
+from attack_search.services.indexing import run_index, run_index_lexical
 from attack_search.services.ingestion import run_ingest
 
 
@@ -35,7 +35,7 @@ def create_parser() -> argparse.ArgumentParser:
         "--data-dir", type=Path, help="Local data directory (default: ATTACK_DATA_DIR or ./data)"
     )
 
-    index = commands.add_parser("index", help="Build a semantic snapshot in Qdrant")
+    index = commands.add_parser("index", help="Build a dense + BM25 snapshot in Qdrant")
     index.add_argument(
         "--dry-run",
         action="store_true",
@@ -48,6 +48,14 @@ def create_parser() -> argparse.ArgumentParser:
     )
     index.add_argument("--batch-size", type=positive_int, default=32)
     index.add_argument("--workers", type=positive_int, default=4)
+    lexical = commands.add_parser(
+        "index-lexical", help="Add or resume BM25 on the published snapshot; preserve dense vectors"
+    )
+    lexical.add_argument(
+        "--dry-run", action="store_true", help="Read PostgreSQL only; no Qdrant requests"
+    )
+    lexical.add_argument("--batch-size", type=positive_int, default=128)
+    lexical.add_argument("--workers", type=positive_int, default=4)
     return parser
 
 
@@ -59,6 +67,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "ingest":
             data_dir = args.data_dir.resolve() if args.data_dir else get_data_directory()
             run_ingest(database_url, data_dir, download=args.download)
+        elif args.command == "index-lexical":
+            run_index_lexical(
+                database_url,
+                dry_run=args.dry_run,
+                batch_size=args.batch_size,
+                workers=args.workers,
+            )
         else:
             run_index(
                 database_url,
