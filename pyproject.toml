@@ -1,0 +1,46 @@
+[project]
+name = "mitre-attack-d-search"
+version = "0.1.0"
+description = "MITRE ATT&CK data preparation and semantic retrieval foundation"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "markdown-it-py>=4,<5",
+    "openai>=2,<3",
+    "pglast>=7,<8",
+    "psycopg[binary]>=3.2,<4",
+    "python-dotenv>=1,<2",
+    "qdrant-client>=1.17,<2",
+    "uvicorn>=0.30,<1",
+]
+
+[project.scripts]
+attack-search = "attack_search.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/attack_search"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/", "tests/", "docs/", "data/README.md", "README.md", "pyproject.toml", "uv.lock", ".env.example", ".gitignore", ".editorconfig"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore:Payload indexes have no effect in the local Qdrant:UserWarning"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8,<10",
+    "ruff>=0.12,<1",
+]
