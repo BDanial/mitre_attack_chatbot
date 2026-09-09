@@ -2,15 +2,16 @@
 
 From a behavior description to ATT&CK techniques, mitigation guidance, and detection evidence.
 
-A Python backend with PostgreSQL, Qdrant, Gemini embeddings through OpenRouter, and two
-API-key-protected FastAPI tools. Built as a technical-assessment project, with readable code
-and documented data models. The retrieval tools work today; the Dify chatbot is the next stage.
+A Python backend with PostgreSQL, Qdrant, Gemini embeddings through OpenRouter, two
+API-key-protected FastAPI tools, and importable Dify workflows. Built as a technical-assessment
+project, with readable code, documented data models, and a ready-to-configure chatbot.
 
 ## Contents
 
 - [Overview](#overview)
 - [Architecture](#architecture)
 - [Requirements](#requirements)
+- [Start from zero](#start-from-zero)
 - [Install the project](#install-the-project)
 - [Configure your services](#configure-your-services)
 - [Generate the files and load PostgreSQL](#generate-the-files-and-load-postgresql)
@@ -43,7 +44,8 @@ This project provides the data and search tools needed to answer those questions
 | Read-only SQL and lexical/semantic/hybrid HTTP tools | Implemented |
 | LLM chooses search mode and relative hybrid weights | Implemented |
 | API-key authentication and generated OpenAPI schema | Implemented |
-| Public deployment and a configured Dify chatbot | Not included yet |
+| Importable Dify SQL/search workflows and ATT&CK chatbot | Included |
+| Public API hosting and external service accounts | Bring your own |
 
 **Verified snapshot:** ATT&CK 19.2, seven PostgreSQL tables, and 23,240 Qdrant points.
 These figures describe the September 2026 review, not fixed counts for future downloads.
@@ -61,7 +63,7 @@ flowchart LR
     BM25 --> QD
     API[FastAPI search tools] -->|SQL| PG
     API -->|Semantic / lexical / weighted hybrid| QD
-    DIFY[Future Dify agent] -.->|Authenticated tool calls| API
+    DIFY[Dify ATT&CK agent] -->|Authenticated tool calls| API
 ```
 
 - **PostgreSQL** stores source records, descriptions, and graph relationships.
@@ -95,6 +97,7 @@ See the [orchestrator guide](docs/orchestrator/semantic-search.md) for graph pat
 - Qdrant server 1.19 or newer, with native BM25 support; upgrade older servers first.
   Weighted rank fusion is performed by the backend.
 - An OpenRouter key with access and credit for `google/gemini-embedding-2`.
+- Dify 1.7 or newer if you want to import and run the included chatbot DSLs.
 
 The project does not create a PostgreSQL server, a database account, or a Qdrant cluster.
 Provision these first. For Qdrant setup, see the [official quickstart](https://qdrant.tech/documentation/quickstart/).
@@ -103,6 +106,76 @@ Provision these first. For Qdrant setup, see the [official quickstart](https://q
 Qdrant are already populated with a matching snapshot, configure their connections and skip
 to the additive lexical upgrade below, then [Run and test the API](#run-and-test-the-api).
 Do not re-import data just to start the API.
+
+## Start from zero
+
+This is the shortest complete path from a new clone to a working Dify chatbot. The sections that
+follow explain every command and operational constraint in more detail.
+
+1. Provision an empty PostgreSQL database, a Qdrant 1.19+ instance, and an OpenRouter account with
+   access to `google/gemini-embedding-2`. Install Git, Python 3.10+, and `uv` locally.
+2. Clone the repository, install the locked dependencies, and create `.env`:
+
+   ```shell
+   git clone https://github.com/BDanial/mitre_attack_chatbot.git
+   cd mitre_attack_chatbot
+   uv sync --locked
+   ```
+
+   Linux / macOS:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   Windows PowerShell:
+
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+
+3. Fill in `DATABASE_URL`, `OPENROUTER_API_KEY`, `QDRANT_URL`, and `QDRANT_API_KEY`. Generate a
+   private `API_KEY` with `uv run python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+   For an internet-facing API, set `API_DATABASE_URL` to a separate SELECT-only PostgreSQL role.
+4. Download and import Enterprise ATT&CK into PostgreSQL:
+
+   ```shell
+   uv run attack-search ingest --download
+   ```
+
+5. Preview, build, and publish the dense plus lexical Qdrant index:
+
+   ```shell
+   uv run attack-search index --dry-run
+   uv run attack-search index --workers 1
+   ```
+
+   A complete run ends with `Ready: attack_semantic -> attack_semantic_v1_<...>`. A limited sample
+   run does not publish the alias and is not sufficient for the chatbot.
+6. Start FastAPI and confirm that its OpenAPI document loads:
+
+   ```shell
+   uv run uvicorn attack_search.api.app:create_app --factory --host 0.0.0.0 --port 8000
+   ```
+
+   Open `http://127.0.0.1:8000/docs`, authorize with the raw `API_KEY`, and test both routes. Before
+   connecting Dify, expose FastAPI through an HTTPS reverse proxy or tunnel, set `API_BASE_URL` to
+   that public base URL, and restart FastAPI. The URL must be reachable from Dify's backend.
+7. Import and configure the three files in [`dify_dsls/`](dify_dsls) in this order:
+
+   1. Import [`mitre_text_to_sql.yml`](dify_dsls/mitre_text_to_sql.yml). In its **HTTP Request**
+      node, replace `https://api.example.com/tools/sql` with your FastAPI URL and replace
+      `YOUR_FASTAPI_API_KEY` with the same raw `API_KEY`; then publish the workflow.
+   2. Import [`mitre_search_qdrant.yml`](dify_dsls/mitre_search_qdrant.yml), configure its
+      **HTTP Request** node the same way using `https://api.example.com/tools/search`, and publish it.
+   3. Import [`mitr_attack.yml`](dify_dsls/mitr_attack.yml). Install/configure the requested
+      OpenRouter and Agent plugins if Dify prompts for them. In the **Agent** node, bind
+      `text_to_sql` and `search_qdrant` to the two
+      workflows imported in the preceding steps; exported workflow IDs are workspace-specific.
+      Select an available chat model, test the agent, and publish the chat app.
+
+The DSL files intentionally contain placeholders rather than credentials or a deployment-specific
+host. Keep API keys in Dify's node/credential settings and out of prompts, screenshots, and Git.
 
 ## Install the project
 
@@ -414,20 +487,27 @@ vectors; review changes to the embedding profile before serving an older index.
 
 ## Connect Dify
 
+The repository includes two tool workflows and the assembled ATT&CK chatflow under
+[`dify_dsls/`](dify_dsls). Follow [Start from zero](#start-from-zero) for the required import order,
+HTTP-node configuration, and tool rebinding. Alternatively, advanced users can import the
+FastAPI `/openapi.json` schema as a Dify custom tool and use the stable operations `query_sql` and
+`search_attack` directly.
+
+In either setup:
+
 1. Deploy the API at a URL reachable from the **Dify backend**, not just your browser.
 2. Set `API_BASE_URL` to that HTTPS URL and restart the API.
-3. Import `/openapi.json` into Dify's custom-tool configuration.
-4. Set API-key authentication: header `X-API-Key`, raw key value, no `Bearer` prefix.
-5. Add `query_sql` and `search_attack` to the agent. Re-import the schema if it still lists `semantic_search`.
-6. Copy the system instructions and examples from the [LLM tool guide](docs/orchestrator/llm-tool-guide.md).
-   Use the [detailed orchestrator guide](docs/orchestrator/semantic-search.md) for graph/evidence policy.
+3. Configure API-key authentication as header `X-API-Key`, raw key value, with no `Bearer` prefix.
+4. Use the system instructions and examples from the [LLM tool guide](docs/orchestrator/llm-tool-guide.md)
+   and the [detailed orchestrator guide](docs/orchestrator/semantic-search.md).
 
 A localhost URL is not reachable from Dify Cloud. From inside a container, localhost normally
 points to that container. Keep API credentials in Dify's authentication settings, not in the
 LLM prompt or tool query.
 
-A deployed Dify workflow and an end-to-end chatbot evaluation are not included in this repository.
-See the [Dify setup instructions](docs/api.md#4-add-the-tools-to-dify).
+The exported DSLs are deployment templates: external credentials, reachable API URLs, model/plugin
+access, publication, and end-to-end evaluation remain specific to each Dify workspace. See the
+[Dify setup instructions](docs/api.md#4-add-the-tools-to-dify).
 
 ## Refresh data and resume indexing
 
@@ -479,6 +559,7 @@ tests/
   unit/                  Data, indexing, API and search-tool tests
   integration/           Local Qdrant tests
 docs/                    Report, schemas, operations, API and orchestrator guides
+dify_dsls/               Importable Dify SQL/search workflows and ATT&CK chatflow
 data/
   raw/                   Generated source JSON; ignored by Git
   processed/             Generated filtered graph and examples; ignored by Git
@@ -532,7 +613,7 @@ the wheel or source distribution.
 ## Scope and security
 
 - This is an **Enterprise ATT&CK retrieval backend**, not a complete autonomous security product.
-- No learned reranker, answer-generation model, or configured Dify workflow is included.
+- No learned reranker, hosted Dify workspace, service credentials, or public deployment is included.
 - Scores rank retrieval evidence; cosine, BM25, and weighted RRF have different scales and are not confidence percentages.
 - Actor names may remain in behavior text, but removed actor nodes and original attribution links
   cannot be recovered as structured facts.

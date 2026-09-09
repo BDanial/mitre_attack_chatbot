@@ -1,0 +1,215 @@
+app:
+  description: ''
+  icon: 🤖
+  icon_background: '#FFEAD5'
+  icon_type: emoji
+  mode: workflow
+  name: mitre_text_to_sql
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.7.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload: {}
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: http-request
+      id: 1788879415015-source-1788879479167-target
+      source: '1788879415015'
+      sourceHandle: source
+      target: '1788879479167'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: end
+      id: 1788879479167-source-1788879763503-target
+      source: '1788879479167'
+      sourceHandle: source
+      target: '1788879763503'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: end
+      id: 1788879479167-fail-branch-1788880577886-target
+      source: '1788879479167'
+      sourceHandle: fail-branch
+      target: '1788880577886'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        selected: false
+        title: User Input
+        type: start
+        variables:
+        - default: ''
+          hint: ''
+          label: sql
+          options: []
+          placeholder: ''
+          required: true
+          type: text-input
+          variable: sql
+        - default: '100'
+          hint: ''
+          label: limit
+          options: []
+          placeholder: ''
+          required: true
+          type: number
+          variable: limit
+      height: 134
+      id: '1788879415015'
+      position:
+        x: 80
+        y: 282
+      positionAbsolute:
+        x: 80
+        y: 282
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        authorization:
+          config: null
+          type: no-auth
+        body:
+          data:
+          - id: key-value-312
+            key: ''
+            type: text
+            value: '{
+
+              "query": {{#1788879415015.sql#}},
+
+              "limit": {{#1788879415015.limit#}},
+
+              }'
+          type: json
+        error_strategy: fail-branch
+        headers: 'Content-Type:application/json
+
+          X-API-Key:YOUR_FASTAPI_API_KEY'
+        method: post
+        params: ''
+        retry_config:
+          max_retries: 1
+          retry_enabled: true
+          retry_interval: 100
+        selected: false
+        ssl_verify: true
+        timeout:
+          connect: 5
+          max_connect_timeout: 0
+          max_read_timeout: 0
+          max_write_timeout: 0
+          read: 5
+          write: 5
+        title: HTTP Request
+        type: http-request
+        url: https://api.example.com/tools/sql
+        variables: []
+      height: 173
+      id: '1788879479167'
+      position:
+        x: 380
+        y: 303
+      positionAbsolute:
+        x: 380
+        y: 303
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        outputs:
+        - value_selector:
+          - '1788879479167'
+          - status_code
+          value_type: number
+          variable: status_code
+        - value_selector:
+          - '1788879479167'
+          - body
+          value_type: string
+          variable: body
+        selected: false
+        title: Output
+        type: end
+      height: 114
+      id: '1788879763503'
+      position:
+        x: 682
+        y: 303
+      positionAbsolute:
+        x: 682
+        y: 303
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        outputs:
+        - value_selector:
+          - '1788879479167'
+          - error_type
+          value_type: string
+          variable: error_type
+        - value_selector:
+          - '1788879479167'
+          - error_message
+          value_type: string
+          variable: error_message
+        selected: false
+        title: Output 2
+        type: end
+      height: 114
+      id: '1788880577886'
+      position:
+        x: 682
+        y: 456
+      positionAbsolute:
+        x: 682
+        y: 456
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    viewport:
+      x: 50.517111596732775
+      y: 162.66022437711558
+      zoom: 0.575943821174679
+  rag_pipeline_variables: []
