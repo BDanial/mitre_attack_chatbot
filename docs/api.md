@@ -214,6 +214,21 @@ weights for hybrid and is `null` for either single mode. Each point contains `id
 and the original `payload`, including source IDs, type, chunk text, provenance, and snapshot.
 Raw vectors are not returned. A successful empty result has `points: []`.
 
+The primary search tool returns recoverable request-validation, safe search-input, and upstream
+Qdrant HTTP 400 errors as HTTP 200 so Dify preserves the diagnostic body:
+
+```json
+{
+  "ok": false,
+  "error_type": "search_error",
+  "detail": "Hybrid mode requires weights with semantic and lexical values"
+}
+```
+
+The LLM must distinguish `points` (successful search, possibly empty) from `ok=false` (failed
+search attempt). It may correct the request and retry when appropriate. Index-readiness failures
+and genuine upstream/service failures remain 503/502 and are not converted into successful transport.
+
 The service resolves and pins the physical collection for the request. Lexical and hybrid
 require the matching BM25 profile and complete sparse index; an incomplete index returns 503
 with an actionable readiness message. For an existing dense snapshot, run
@@ -323,8 +338,8 @@ contain a configured Dify workspace, a deployed public URL, or a tested Dify con
 
 | HTTP status | Meaning |
 | --- | --- |
-| 200 with `ok=false` | Recoverable SQL syntax, policy, or PostgreSQL statement error |
-| 400 | Unsupported search filter or other safe non-SQL tool-input error |
+| 200 with `ok=false` | Recoverable SQL or primary-search request/tool error; inspect `error_type` |
+| 400 | Safe input error from a legacy or defensive non-primary route |
 | 401 | Missing or incorrect `X-API-Key` |
 | 422 | Request-body validation failed; for example an empty query or invalid limit |
 | 503 | SQL connection is missing/unavailable, or lexical/hybrid index is not ready |
@@ -340,8 +355,9 @@ not exposed. Connection failures and timeouts retain generic messages.
 
 Qdrant HTTP errors return the JSON `status.error` string in `detail`, capped at 1,000 characters
 with configured credentials redacted. Unrecognized/non-JSON responses retain the generic message;
-raw bodies and headers are never forwarded. Upstream HTTP 400 maps to 400; other Qdrant HTTP
-errors map to 502.
+raw bodies and headers are never forwarded. On the primary `/tools/search` route, upstream HTTP 400
+uses the HTTP-200 `search_error` envelope above. Other Qdrant HTTP errors map to 502. The hidden
+legacy route retains its original 400/502 behavior.
 
 ## 6. Tests
 

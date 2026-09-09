@@ -24,9 +24,21 @@ def configured_app(monkeypatch):
     monkeypatch.setenv("API_BASE_URL", "https://search.example.test/")
     sql = Mock(return_value={"columns": ["id"], "rows": [[1]], "row_count": 1, "truncated": False})
     semantic = Mock(return_value={"collection": "test", "points": [], "limit": 10, "offset": 0})
+    search = Mock(
+        return_value={
+            "collection": "test",
+            "points": [],
+            "limit": 10,
+            "offset": 0,
+            "mode": "lexical",
+            "score_kind": "bm25",
+            "weights": None,
+        }
+    )
     monkeypatch.setattr(api, "query_sql", sql)
     monkeypatch.setattr(api, "semantic_search", semantic)
-    return api.create_app(), sql, semantic
+    monkeypatch.setattr(api, "search_attack", search)
+    return api.create_app(), sql, semantic, search
 
 
 @pytest.fixture
@@ -43,6 +55,13 @@ def test_authentication_rejects_before_service_execution(client, configured_app,
     assert response.json() == {"detail": "Invalid or missing API key"}
     configured_app[1].assert_not_called()
     configured_app[2].assert_not_called()
+
+
+def test_primary_search_authentication_stays_non_2xx(client, configured_app):
+    response = client.post("/tools/search", json={"mode": "lexical", "query": "PowerShell"})
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid or missing API key"}
+    configured_app[3].assert_not_called()
 
 
 @pytest.mark.parametrize("key", [None, "", "too-short", "replace-me"])
@@ -92,6 +111,13 @@ def test_openapi_has_two_stable_tools_header_security_and_server(client):
     assert {item["$ref"] for item in sql_success_schema["anyOf"]} == {
         "#/components/schemas/SQLResponse",
         "#/components/schemas/SQLErrorResponse",
+    }
+    search_success_schema = schema["paths"]["/tools/search"]["post"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"]
+    assert {item["$ref"] for item in search_success_schema["anyOf"]} == {
+        "#/components/schemas/SearchResponse",
+        "#/components/schemas/SearchErrorResponse",
     }
     schemes = schema["components"]["securitySchemes"]
     for path in schema["paths"].values():
@@ -206,6 +232,57 @@ def test_sql_primary_diagnostic_redacts_configured_secrets_and_caps_length(clien
     assert TEST_KEY not in response.text
     assert response.json()["detail"].startswith("[REDACTED]")
     assert len(response.json()["detail"]) == 1000
+
+
+def test_primary_search_validation_error_is_returned_as_tool_result(client, configured_app):
+    response = client.post(
+        "/tools/search",
+        headers=AUTH,
+        json={"mode": "hybrid", "query": "PowerShell"},
+    )
+    assert response.status_code == 200
+    assert response.json()["ok"] is False
+    assert response.json()["error_type"] == "search_error"
+    assert "weights" in response.json()["detail"]
+    configured_app[3].assert_not_called()
+
+
+def test_primary_search_input_error_is_returned_as_tool_result(client, configured_app):
+    configured_app[3].side_effect = SearchInputError("Invalid search request")
+    response = client.post(
+        "/tools/search", headers=AUTH, json={"mode": "lexical", "query": "PowerShell"}
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": False,
+        "error_type": "search_error",
+        "detail": "Invalid search request",
+    }
+
+
+@pytest.mark.parametrize("status", [400, 503])
+def test_primary_search_qdrant_errors_distinguish_recoverable_from_upstream(
+    client, configured_app, status
+):
+    configured_app[3].side_effect = UnexpectedResponse(
+        status_code=status,
+        reason_phrase="private reason",
+        content=json.dumps({"status": {"error": "Wrong input: invalid vector name"}}).encode(),
+        headers={"api-key": "private key"},
+    )
+    response = client.post(
+        "/tools/search", headers=AUTH, json={"mode": "lexical", "query": "PowerShell"}
+    )
+    if status == 400:
+        assert response.status_code == 200
+        assert response.json() == {
+            "ok": False,
+            "error_type": "search_error",
+            "detail": "Wrong input: invalid vector name",
+        }
+    else:
+        assert response.status_code == 502
+        assert response.json() == {"detail": "Wrong input: invalid vector name"}
 
 
 @pytest.mark.parametrize("status", [400, 401, 503])

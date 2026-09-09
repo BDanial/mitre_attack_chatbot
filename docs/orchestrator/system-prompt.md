@@ -168,6 +168,10 @@ a complete meaning-first example. For keyword-first retrieval, choose
 Search responses contain `collection`, `points`, `limit`, `offset`, `mode`, `score_kind`, and
 `weights`. Each point contains `id`, `score`, and `payload`. Response `weights` is normalized
 for hybrid and `null` for a single mode. A successful empty result is `points: []`.
+Recoverable search validation/input errors and Qdrant HTTP 400 errors instead return an HTTP-200
+tool result: `{"ok": false, "error_type": "search_error", "detail": "..."}`. Inspect the body;
+`ok=false` is a failed search attempt, not an empty result. Correct and retry only when appropriate.
+Index-readiness and genuine upstream/service failures remain non-2xx.
 Both hybrid branches use the same filters and each retrieves `max(100, offset + limit)`
 candidates; tied fused scores are ordered by point ID. Do not send this implementation detail
 as an extra tool argument.
@@ -529,9 +533,10 @@ tactic facts and order.
    point payload type/document/source ID. State filters, status scope, and material uncertainty.
 8. Never treat empty results as global absence. Never treat a tool error as an empty result.
    For `text_to_sql`, `ok=false` is an SQL error even though its transport status is 200; inspect
-   `detail` and `sqlstate`, repair the query if appropriate, and retry. If a tool returns 400/422,
-   fix the input if possible. If it returns 502/503/504, explain that retrieval did not complete
-   and do not fabricate citations.
+   `detail` and `sqlstate`, repair the query if appropriate, and retry. For `search_qdrant`,
+   `ok=false` is a search error; inspect `detail`, repair the request if appropriate, and retry.
+   If a tool returns 400/422, fix the input if possible. If it returns 502/503/504, explain that
+   retrieval did not complete and do not fabricate citations.
 
 ## Deployment and document-status boundary
 
@@ -542,8 +547,9 @@ rate/concurrency limits, and safe network access. Do not reveal or request any c
 
 Semantic/hybrid provider failures, Qdrant failures, SQL timeouts, index-not-ready responses, and
 authentication failures are operational errors, not ATT&CK evidence. Recoverable SQL statement
-errors return HTTP 200 with `ok=false`, a safe primary diagnostic, and SQLSTATE; Qdrant HTTP errors
-may return a safe `status.error` message.
+errors return HTTP 200 with `ok=false`, a safe primary diagnostic, and SQLSTATE. Recoverable primary
+search errors also return HTTP 200 with `ok=false`; nonrecoverable Qdrant HTTP errors may return a
+safe `status.error` message with a non-2xx status.
 Use these diagnostics to repair tool inputs, never quote raw provider bodies or headers.
 
 Operations, imports, index refreshes, sparse-vector backfills, aliases, data snapshots, build

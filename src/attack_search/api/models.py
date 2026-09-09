@@ -71,3 +71,11 @@ class SearchResponse(SemanticResponse):
     mode: Literal["semantic", "lexical", "hybrid"]
     score_kind: Literal["cosine", "bm25", "weighted_rrf"]
     weights: dict[str, float] | None
+
+
+class SearchErrorResponse(BaseModel):
+    """Recoverable search feedback returned as HTTP 200 so tool hosts preserve it."""
+
+    ok: Literal[False] = False
+    error_type: Literal["search_error"] = "search_error"
+    detail: str

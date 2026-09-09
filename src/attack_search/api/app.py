@@ -7,12 +7,15 @@ from typing import Annotated
 
 import psycopg
 from fastapi import Body, Depends, FastAPI, HTTPException, Request, Security
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
 from qdrant_client.http.exceptions import UnexpectedResponse
 
 from attack_search import __version__
 from attack_search.api.models import (
+    SearchErrorResponse,
     SearchRequest,
     SearchResponse,
     SemanticRequest,
@@ -70,6 +73,21 @@ def create_app() -> FastAPI:
             sqlstate = None
         return SQLErrorResponse(detail=redact_known_secrets(detail), sqlstate=sqlstate)
 
+    def qdrant_error_detail(exc: UnexpectedResponse) -> str:
+        detail = "Qdrant request failed"
+        try:
+            body = json.loads(exc.content)
+            remote_status = body.get("status") if isinstance(body, dict) else None
+            message = remote_status.get("error") if isinstance(remote_status, dict) else None
+            if isinstance(message, str) and message.strip():
+                detail = message
+        except (ValueError, TypeError):
+            pass  # A proxy may return HTML or malformed JSON; never expose its raw body.
+        return redact_known_secrets(detail)
+
+    def search_error_response(detail: str) -> SearchErrorResponse:
+        return SearchErrorResponse(detail=redact_known_secrets(detail))
+
     def authenticate(key: Annotated[str | None, Security(key_header)] = None):
         if key is None or not secrets.compare_digest(key.encode(), api_key.encode()):
             raise HTTPException(status_code=401, detail="Invalid or missing API key")
@@ -99,7 +117,7 @@ def create_app() -> FastAPI:
     @app.post(
         "/tools/search",
         operation_id="search_attack",
-        response_model=SearchResponse,
+        response_model=SearchResponse | SearchErrorResponse,
         dependencies=[Depends(authenticate)],
         summary="Search ATT&CK by meaning, keywords, or both",
         description="Choose mode: semantic for meaning, lexical for English words/commands, hybrid "
@@ -107,7 +125,8 @@ def create_app() -> FastAPI:
         "optional lexical_query gives English keywords for a Persian query. Use simple filters "
         "(types, technique_attack_ids, platforms, is_active); never write Qdrant syntax or vectors. "
         "Omitted filters search active records. Results are evidence chunks, not complete lists. "
-        "Use query_sql for exact counts and graph relationships. Only semantic/hybrid calls OpenRouter.",
+        "Use query_sql for exact counts and graph relationships. Only semantic/hybrid calls OpenRouter. "
+        "Recoverable search errors return HTTP 200 with ok=false and detail.",
     )
     def search_tool(
         body: Annotated[
@@ -120,7 +139,14 @@ def create_app() -> FastAPI:
             ),
         ],
     ):
-        return search_attack(body)
+        try:
+            return search_attack(body)
+        except SearchInputError as exc:
+            return search_error_response(str(exc))
+        except UnexpectedResponse as exc:
+            if exc.status_code != 400:
+                raise
+            return search_error_response(qdrant_error_detail(exc))
 
     @app.post(
         "/tools/semantic-search",
@@ -141,6 +167,17 @@ def create_app() -> FastAPI:
             offset=body.offset,
             question_answering=body.question_answering,
         )
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_error(request: Request, exc: RequestValidationError):
+        if request.url.path != "/tools/search":
+            return await request_validation_exception_handler(request, exc)
+        messages = []
+        for error in exc.errors():
+            location = ".".join(str(part) for part in error["loc"] if part != "body")
+            messages.append(f"{location}: {error['msg']}" if location else error["msg"])
+        detail = "Invalid search request: " + "; ".join(messages)
+        return JSONResponse(status_code=200, content=search_error_response(detail).model_dump())
 
     @app.exception_handler(SearchInputError)
     async def invalid_query(request: Request, exc: SearchInputError):
@@ -172,16 +209,7 @@ def create_app() -> FastAPI:
     @app.exception_handler(UnexpectedResponse)
     async def qdrant_error(request: Request, exc: UnexpectedResponse):
         status = 400 if exc.status_code == 400 else 502
-        detail = "Qdrant request failed"
-        try:
-            body = json.loads(exc.content)
-            remote_status = body.get("status") if isinstance(body, dict) else None
-            message = remote_status.get("error") if isinstance(remote_status, dict) else None
-            if isinstance(message, str) and message.strip():
-                detail = message
-        except (ValueError, TypeError):
-            pass  # A proxy may return HTML or malformed JSON; never expose its raw body.
-        return JSONResponse(status_code=status, content={"detail": redact_known_secrets(detail)})
+        return JSONResponse(status_code=status, content={"detail": qdrant_error_detail(exc)})
 
     @app.exception_handler(Exception)
     async def service_error(request: Request, exc: Exception):

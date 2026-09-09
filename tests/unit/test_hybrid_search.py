@@ -146,10 +146,13 @@ def test_dify_nested_objects_accept_native_values_and_json_strings(as_strings):
         {**HYBRID, "using": "arbitrary-vector"},
     ],
 )
-def test_invalid_llm_requests_are_rejected_without_service_execution(http_client, body):
+def test_invalid_llm_requests_return_tool_errors_without_service_execution(http_client, body):
     client, service = http_client
     response = client.post("/tools/search", headers=AUTH, json=body)
-    assert response.status_code == 422, response.text
+    assert response.status_code == 200, response.text
+    assert response.json()["ok"] is False
+    assert response.json()["error_type"] == "search_error"
+    assert response.json()["detail"].startswith("Invalid search request:")
     service.assert_not_called()
 
 
