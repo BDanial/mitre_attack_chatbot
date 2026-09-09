@@ -22,6 +22,7 @@ Never copy native Qdrant storage/configuration JSON into a tool request.
 | File | Scope |
 | --- | --- |
 | [LLM tool guide](orchestrator/llm-tool-guide.md) | Current tool-use instructions and complete JSON examples |
+| [Self-contained system prompt](orchestrator/system-prompt.md) | Copyable English orchestrator prompt consolidating the documentation and the live tactic catalog |
 | [API contract](api.md) | Exact input/output contract, errors, and separately labeled host/legacy details |
 | [Orchestrator reference](orchestrator/semantic-search.md) | Retrieval decisions, graph verification, current call examples, SQL recipes |
 | [PostgreSQL appendix](appendices/postgresql.md) | Tables, views, joins, and read-only SQL examples |

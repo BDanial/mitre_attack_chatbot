@@ -172,6 +172,31 @@ def test_sql_errors_return_safe_status_and_no_upstream_details(
     assert TEST_KEY not in response.text
 
 
+def test_sql_primary_diagnostic_is_returned_without_context(client, configured_app):
+    configured_app[1].side_effect = psycopg.errors.UndefinedColumn(
+        "private raw error",
+        info={
+            psycopg.pq.DiagnosticField.MESSAGE_PRIMARY: b'column "bad_column" does not exist',
+            psycopg.pq.DiagnosticField.MESSAGE_DETAIL: b"private detail",
+            psycopg.pq.DiagnosticField.CONTEXT: b"private context",
+        },
+    )
+    response = client.post("/tools/sql", headers=AUTH, json={"query": "SELECT bad_column"})
+    assert response.status_code == 400
+    assert response.json() == {"detail": 'column "bad_column" does not exist', "sqlstate": "42703"}
+
+
+def test_sql_primary_diagnostic_redacts_configured_secrets_and_caps_length(client, configured_app):
+    configured_app[1].side_effect = psycopg.errors.UndefinedColumn(
+        info={psycopg.pq.DiagnosticField.MESSAGE_PRIMARY: (TEST_KEY + " " + "x" * 1200).encode()}
+    )
+    response = client.post("/tools/sql", headers=AUTH, json={"query": "SELECT 1"})
+    assert response.status_code == 400
+    assert TEST_KEY not in response.text
+    assert response.json()["detail"].startswith("[REDACTED]")
+    assert len(response.json()["detail"]) == 1000
+
+
 @pytest.mark.parametrize("status", [400, 401, 503])
 def test_qdrant_errors_do_not_expose_headers_or_response_body(client, configured_app, status):
     configured_app[2].side_effect = UnexpectedResponse(
@@ -184,6 +209,45 @@ def test_qdrant_errors_do_not_expose_headers_or_response_body(client, configured
     assert response.status_code == (400 if status == 400 else 502)
     assert response.json() == {"detail": "Qdrant request failed"}
     assert "private" not in response.text
+
+
+@pytest.mark.parametrize("status", [400, 404, 503])
+def test_qdrant_json_error_returns_message(client, configured_app, status):
+    configured_app[2].side_effect = UnexpectedResponse(
+        status_code=status,
+        reason_phrase="private reason",
+        content=json.dumps(
+            {"status": {"error": "Wrong input: invalid vector name"}, "extra": "private details"}
+        ).encode(),
+        headers={"api-key": "private key"},
+    )
+    response = client.post("/tools/semantic-search", headers=AUTH, json={"query": "PowerShell"})
+    assert response.status_code == (400 if status == 400 else 502)
+    assert response.json() == {"detail": "Wrong input: invalid vector name"}
+
+
+@pytest.mark.parametrize("body", [[], None, {"status": "error"}, {"status": {"error": {}}}])
+def test_qdrant_unrecognized_json_uses_generic_message(client, configured_app, body):
+    configured_app[2].side_effect = UnexpectedResponse(
+        status_code=400, reason_phrase="private", content=json.dumps(body).encode(), headers={}
+    )
+    response = client.post("/tools/semantic-search", headers=AUTH, json={"query": "PowerShell"})
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Qdrant request failed"}
+
+
+def test_qdrant_error_redacts_secret_and_caps_length(client, configured_app):
+    configured_app[2].side_effect = UnexpectedResponse(
+        status_code=400,
+        reason_phrase="private",
+        content=json.dumps({"status": {"error": TEST_KEY + " " + "x" * 1200}}).encode(),
+        headers={},
+    )
+    response = client.post("/tools/semantic-search", headers=AUTH, json={"query": "PowerShell"})
+    assert response.status_code == 400
+    assert TEST_KEY not in response.text
+    assert response.json()["detail"].startswith("[REDACTED]")
+    assert len(response.json()["detail"]) == 1000
 
 
 @pytest.mark.parametrize("error_type", [RuntimeError, ValueError])

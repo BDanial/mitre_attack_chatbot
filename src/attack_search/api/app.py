@@ -1,5 +1,6 @@
 """Run: uvicorn attack_search.api.app:create_app --factory --host 127.0.0.1"""
 
+import json
 import os
 import secrets
 from typing import Annotated
@@ -128,10 +129,22 @@ def create_app() -> FastAPI:
             return JSONResponse(status_code=504, content={"detail": "SQL exceeded its time limit"})
         if isinstance(exc, psycopg.OperationalError):
             return JSONResponse(status_code=503, content={"detail": "SQL service is unavailable"})
+        # Return only the primary SQL diagnostic, never connection/context/traceback text.
+        detail = exc.diag.message_primary or "SQL was rejected; check syntax, names and permissions"
+        for name in (
+            "DATABASE_URL",
+            "API_DATABASE_URL",
+            "API_KEY",
+            "OPENROUTER_API_KEY",
+            "QDRANT_API_KEY",
+        ):
+            secret = os.environ.get(name)
+            if secret:
+                detail = detail.replace(secret, "[REDACTED]")
         return JSONResponse(
             status_code=400,
             content={
-                "detail": "SQL was rejected; check syntax, names and permissions",
+                "detail": detail[:1000],
                 "sqlstate": exc.sqlstate,
             },
         )
@@ -139,7 +152,26 @@ def create_app() -> FastAPI:
     @app.exception_handler(UnexpectedResponse)
     async def qdrant_error(request: Request, exc: UnexpectedResponse):
         status = 400 if exc.status_code == 400 else 502
-        return JSONResponse(status_code=status, content={"detail": "Qdrant request failed"})
+        detail = "Qdrant request failed"
+        try:
+            body = json.loads(exc.content)
+            remote_status = body.get("status") if isinstance(body, dict) else None
+            message = remote_status.get("error") if isinstance(remote_status, dict) else None
+            if isinstance(message, str) and message.strip():
+                detail = message
+        except (ValueError, TypeError):
+            pass  # A proxy may return HTML or malformed JSON; never expose its raw body.
+        for name in (
+            "DATABASE_URL",
+            "API_DATABASE_URL",
+            "API_KEY",
+            "OPENROUTER_API_KEY",
+            "QDRANT_API_KEY",
+        ):
+            secret = os.environ.get(name)
+            if secret:
+                detail = detail.replace(secret, "[REDACTED]")
+        return JSONResponse(status_code=status, content={"detail": detail[:1000]})
 
     @app.exception_handler(Exception)
     async def service_error(request: Request, exc: Exception):

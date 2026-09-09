@@ -315,7 +315,14 @@ contain a configured Dify workspace, a deployed public URL, or a tested Dify con
 
 Do not treat an error as “no matching evidence.” Raw provider messages, database URLs, headers,
 and tracebacks are not returned in tool responses. SQL errors include their SQLSTATE where available,
-but not the original database error text. Only deliberate input-validation messages are exposed.
+and the primary PostgreSQL SQL-error message in `detail` (up to 1,000 characters, with configured
+credentials redacted). Diagnostic context, extra detail, raw exception text, and tracebacks are
+not exposed. Connection failures and timeouts retain generic messages.
+
+Qdrant HTTP errors return the JSON `status.error` string in `detail`, capped at 1,000 characters
+with configured credentials redacted. Unrecognized/non-JSON responses retain the generic message;
+raw bodies and headers are never forwarded. Upstream HTTP 400 maps to 400; other Qdrant HTTP
+errors map to 502.
 
 ## 6. Tests
 
