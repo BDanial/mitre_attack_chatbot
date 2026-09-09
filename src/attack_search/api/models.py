@@ -22,6 +22,15 @@ class SQLResponse(BaseModel):
     truncated: bool
 
 
+class SQLErrorResponse(BaseModel):
+    """Recoverable SQL feedback returned as HTTP 200 so tool hosts preserve it."""
+
+    ok: Literal[False] = False
+    error_type: Literal["sql_error"] = "sql_error"
+    detail: str
+    sqlstate: str | None = None
+
+
 class SemanticRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 

@@ -86,6 +86,13 @@ def test_openapi_has_two_stable_tools_header_security_and_server(client):
     assert schema["servers"] == [{"url": "https://search.example.test"}]
     assert schema["paths"]["/tools/sql"]["post"]["operationId"] == "query_sql"
     assert schema["paths"]["/tools/search"]["post"]["operationId"] == "search_attack"
+    sql_success_schema = schema["paths"]["/tools/sql"]["post"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"]
+    assert {item["$ref"] for item in sql_success_schema["anyOf"]} == {
+        "#/components/schemas/SQLResponse",
+        "#/components/schemas/SQLErrorResponse",
+    }
     schemes = schema["components"]["securitySchemes"]
     for path in schema["paths"].values():
         security = path["post"]["security"]
@@ -159,7 +166,6 @@ def test_invalid_request_contracts_do_not_call_services(client, configured_app, 
     [
         (psycopg.errors.QueryCanceled("private SQL details"), 504),
         (psycopg.OperationalError("postgresql://private-user:private-secret@private-host"), 503),
-        (psycopg.errors.UndefinedTable("private schema details"), 400),
     ],
 )
 def test_sql_errors_return_safe_status_and_no_upstream_details(
@@ -182,8 +188,13 @@ def test_sql_primary_diagnostic_is_returned_without_context(client, configured_a
         },
     )
     response = client.post("/tools/sql", headers=AUTH, json={"query": "SELECT bad_column"})
-    assert response.status_code == 400
-    assert response.json() == {"detail": 'column "bad_column" does not exist', "sqlstate": "42703"}
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": False,
+        "error_type": "sql_error",
+        "detail": 'column "bad_column" does not exist',
+        "sqlstate": "42703",
+    }
 
 
 def test_sql_primary_diagnostic_redacts_configured_secrets_and_caps_length(client, configured_app):
@@ -191,7 +202,7 @@ def test_sql_primary_diagnostic_redacts_configured_secrets_and_caps_length(clien
         info={psycopg.pq.DiagnosticField.MESSAGE_PRIMARY: (TEST_KEY + " " + "x" * 1200).encode()}
     )
     response = client.post("/tools/sql", headers=AUTH, json={"query": "SELECT 1"})
-    assert response.status_code == 400
+    assert response.status_code == 200
     assert TEST_KEY not in response.text
     assert response.json()["detail"].startswith("[REDACTED]")
     assert len(response.json()["detail"]) == 1000
@@ -258,8 +269,13 @@ def test_generic_provider_failure_does_not_expose_secrets(client, configured_app
     assert response.json() == {"detail": "Search service is unavailable"}
 
 
-def test_known_input_error_is_returned_as_400(client, configured_app):
+def test_known_sql_input_error_is_returned_as_tool_result(client, configured_app):
     configured_app[1].side_effect = SearchInputError("Only SELECT queries are allowed")
     response = client.post("/tools/sql", headers=AUTH, json={"query": "DELETE FROM attack.nodes"})
-    assert response.status_code == 400
-    assert response.json() == {"detail": "Only SELECT queries are allowed"}
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": False,
+        "error_type": "sql_error",
+        "detail": "Only SELECT queries are allowed",
+        "sqlstate": None,
+    }

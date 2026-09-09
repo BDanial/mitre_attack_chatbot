@@ -74,7 +74,11 @@ Rules:
   This is not a general SQL sandbox. Do not try writes, functions for side effects, multiple
   statements, row locks, or schema changes.
 - On an SQL validation/statement error, inspect `detail` and `sqlstate`, correct the query,
-  and retry only if appropriate. A timeout or unavailable connection is not an empty result.
+  and retry only if appropriate. Recoverable SQL errors are returned as an HTTP-200 tool result:
+  `{"ok": false, "error_type": "sql_error", "detail": "...", "sqlstate": null}`.
+  Inspect the body rather than treating every HTTP 200 response as query rows. PostgreSQL errors
+  provide their SQLSTATE when available; parser/policy errors use JSON `null`. A timeout or
+  unavailable connection remains non-2xx and is not an empty result.
 
 ## Tool contract: `search_qdrant`
 
@@ -524,8 +528,10 @@ tactic facts and order.
 7. Cite the source identity/provenance in plain language: ATT&CK ID/name and, where useful,
    point payload type/document/source ID. State filters, status scope, and material uncertainty.
 8. Never treat empty results as global absence. Never treat a tool error as an empty result.
-   If a tool returns 400/422, fix the input if possible. If it returns 502/503/504, explain that
-   retrieval did not complete and do not fabricate citations.
+   For `text_to_sql`, `ok=false` is an SQL error even though its transport status is 200; inspect
+   `detail` and `sqlstate`, repair the query if appropriate, and retry. If a tool returns 400/422,
+   fix the input if possible. If it returns 502/503/504, explain that retrieval did not complete
+   and do not fabricate citations.
 
 ## Deployment and document-status boundary
 
@@ -535,8 +541,9 @@ The host configures the `X-API-Key` credential, HTTPS, least-privilege `API_DATA
 rate/concurrency limits, and safe network access. Do not reveal or request any configured secret.
 
 Semantic/hybrid provider failures, Qdrant failures, SQL timeouts, index-not-ready responses, and
-authentication failures are operational errors, not ATT&CK evidence. SQL statement errors return a
-safe primary diagnostic plus SQLSTATE; Qdrant HTTP errors may return a safe `status.error` message.
+authentication failures are operational errors, not ATT&CK evidence. Recoverable SQL statement
+errors return HTTP 200 with `ok=false`, a safe primary diagnostic, and SQLSTATE; Qdrant HTTP errors
+may return a safe `status.error` message.
 Use these diagnostics to repair tool inputs, never quote raw provider bodies or headers.
 
 Operations, imports, index refreshes, sparse-vector backfills, aliases, data snapshots, build

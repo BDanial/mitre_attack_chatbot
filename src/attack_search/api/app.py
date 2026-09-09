@@ -17,6 +17,7 @@ from attack_search.api.models import (
     SearchResponse,
     SemanticRequest,
     SemanticResponse,
+    SQLErrorResponse,
     SQLRequest,
     SQLResponse,
 )
@@ -45,6 +46,30 @@ def create_app() -> FastAPI:
     )
     key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
+    def redact_known_secrets(detail: str) -> str:
+        for name in (
+            "DATABASE_URL",
+            "API_DATABASE_URL",
+            "API_KEY",
+            "OPENROUTER_API_KEY",
+            "QDRANT_API_KEY",
+        ):
+            secret = os.environ.get(name)
+            if secret:
+                detail = detail.replace(secret, "[REDACTED]")
+        return detail[:1000]
+
+    def sql_error_response(exc: SearchInputError | psycopg.Error) -> SQLErrorResponse:
+        if isinstance(exc, psycopg.Error):
+            detail = (
+                exc.diag.message_primary or "SQL was rejected; check syntax, names and permissions"
+            )
+            sqlstate = exc.sqlstate
+        else:
+            detail = str(exc)
+            sqlstate = None
+        return SQLErrorResponse(detail=redact_known_secrets(detail), sqlstate=sqlstate)
+
     def authenticate(key: Annotated[str | None, Security(key_header)] = None):
         if key is None or not secrets.compare_digest(key.encode(), api_key.encode()):
             raise HTTPException(status_code=401, detail="Invalid or missing API key")
@@ -52,16 +77,24 @@ def create_app() -> FastAPI:
     @app.post(
         "/tools/sql",
         operation_id="query_sql",
-        response_model=SQLResponse,
+        response_model=SQLResponse | SQLErrorResponse,
         dependencies=[Depends(authenticate)],
         summary="Query ATT&CK with read-only PostgreSQL",
         description="Use for exact IDs, graph joins, counts and lists. One SELECT or read-only CTE; "
-        "qualify tables with attack. Row cap 500 and statement timeout 5 seconds.",
+        "qualify tables with attack. Row cap 500 and statement timeout 5 seconds. Recoverable SQL "
+        "errors return HTTP 200 with ok=false, detail and nullable sqlstate so tool hosts preserve them.",
     )
     def sql_tool(body: SQLRequest):
         if not database_url:
             raise HTTPException(status_code=503, detail="SQL connection is not configured")
-        return query_sql(body.query, database_url=database_url, limit=body.limit)
+        try:
+            return query_sql(body.query, database_url=database_url, limit=body.limit)
+        except SearchInputError as exc:
+            return sql_error_response(exc)
+        except psycopg.Error as exc:
+            if isinstance(exc, (psycopg.errors.QueryCanceled, psycopg.OperationalError)):
+                raise
+            return sql_error_response(exc)
 
     @app.post(
         "/tools/search",
@@ -129,24 +162,11 @@ def create_app() -> FastAPI:
             return JSONResponse(status_code=504, content={"detail": "SQL exceeded its time limit"})
         if isinstance(exc, psycopg.OperationalError):
             return JSONResponse(status_code=503, content={"detail": "SQL service is unavailable"})
-        # Return only the primary SQL diagnostic, never connection/context/traceback text.
-        detail = exc.diag.message_primary or "SQL was rejected; check syntax, names and permissions"
-        for name in (
-            "DATABASE_URL",
-            "API_DATABASE_URL",
-            "API_KEY",
-            "OPENROUTER_API_KEY",
-            "QDRANT_API_KEY",
-        ):
-            secret = os.environ.get(name)
-            if secret:
-                detail = detail.replace(secret, "[REDACTED]")
+        # Defensive fallback for database errors outside the SQL tool route.
+        error = sql_error_response(exc)
         return JSONResponse(
             status_code=400,
-            content={
-                "detail": detail[:1000],
-                "sqlstate": exc.sqlstate,
-            },
+            content={"detail": error.detail, "sqlstate": error.sqlstate},
         )
 
     @app.exception_handler(UnexpectedResponse)
@@ -161,17 +181,7 @@ def create_app() -> FastAPI:
                 detail = message
         except (ValueError, TypeError):
             pass  # A proxy may return HTML or malformed JSON; never expose its raw body.
-        for name in (
-            "DATABASE_URL",
-            "API_DATABASE_URL",
-            "API_KEY",
-            "OPENROUTER_API_KEY",
-            "QDRANT_API_KEY",
-        ):
-            secret = os.environ.get(name)
-            if secret:
-                detail = detail.replace(secret, "[REDACTED]")
-        return JSONResponse(status_code=status, content={"detail": detail[:1000]})
+        return JSONResponse(status_code=status, content={"detail": redact_known_secrets(detail)})
 
     @app.exception_handler(Exception)
     async def service_error(request: Request, exc: Exception):

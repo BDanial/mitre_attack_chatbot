@@ -73,6 +73,23 @@ Example response:
 }
 ```
 
+A recoverable SQL syntax, policy, or PostgreSQL statement error is also a successful tool
+transport response (HTTP 200), so Dify passes its diagnostic body to the LLM:
+
+```json
+{
+  "ok": false,
+  "error_type": "sql_error",
+  "detail": "column \"bad_column\" does not exist",
+  "sqlstate": "42703"
+}
+```
+
+The LLM must inspect the response shape: `columns` identifies a successful query, while
+`ok=false` identifies a failed SQL attempt that may be corrected and retried. Parser/policy errors
+can have `sqlstate: null`. This HTTP-200 envelope is limited to recoverable SQL errors because some
+tool hosts discard bodies on non-2xx responses. It does not convert infrastructure failures into success.
+
 `rows` is an array of arrays, in `columns` order. This preserves duplicate column names, nulls,
 and JSON values without silently overwriting a dictionary key. Prefer explicit SQL aliases for
 readability. `row_count` is the number returned, not the total number in the database.
@@ -306,7 +323,8 @@ contain a configured Dify workspace, a deployed public URL, or a tested Dify con
 
 | HTTP status | Meaning |
 | --- | --- |
-| 400 | Rejected SQL, unsupported filter, or other safe tool-input error |
+| 200 with `ok=false` | Recoverable SQL syntax, policy, or PostgreSQL statement error |
+| 400 | Unsupported search filter or other safe non-SQL tool-input error |
 | 401 | Missing or incorrect `X-API-Key` |
 | 422 | Request-body validation failed; for example an empty query or invalid limit |
 | 503 | SQL connection is missing/unavailable, or lexical/hybrid index is not ready |
@@ -314,7 +332,8 @@ contain a configured Dify workspace, a deployed public URL, or a tested Dify con
 | 502 | Upstream/search service failure |
 
 Do not treat an error as “no matching evidence.” Raw provider messages, database URLs, headers,
-and tracebacks are not returned in tool responses. SQL errors include their SQLSTATE where available,
+and tracebacks are not returned in tool responses. Recoverable SQL errors use the HTTP-200 error
+envelope above and include their SQLSTATE where available,
 and the primary PostgreSQL SQL-error message in `detail` (up to 1,000 characters, with configured
 credentials redacted). Diagnostic context, extra detail, raw exception text, and tracebacks are
 not exposed. Connection failures and timeouts retain generic messages.
