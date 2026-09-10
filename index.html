@@ -16,6 +16,7 @@
     .skip { position: absolute; left: 16px; top: -70px; padding: 10px 16px; background: white; z-index: 2; }
     .skip:focus { top: 10px; }
     .wrap { width: min(1120px, calc(100% - 48px)); margin-inline: auto; }
+    .first-screen { display: grid; grid-template-rows: auto minmax(360px, 1fr) auto; height: 100vh; height: 100dvh; min-height: min-content; padding-bottom: 12px; }
     header { padding-top: 25px; }
     .profile { display: flex; justify-content: space-between; align-items: center; gap: 12px 24px; flex-wrap: wrap; }
     .name { font-size: 17px; font-weight: 650; letter-spacing: -.3px; }
@@ -30,10 +31,12 @@
     nav a { text-decoration: none; color: var(--muted); }
     nav a:first-child { color: var(--blue); font-weight: 600; }
     nav a:hover { text-decoration: underline; }
-    .chat { overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: white; box-shadow: 0 5px 24px #20263505; }
+    .chat { display: flex; flex-direction: column; min-height: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: white; box-shadow: 0 5px 24px #20263505; }
     .chat-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 12px; }
     .chat-bar span { color: var(--muted); }
-    iframe { display: block; width: 100%; height: 76vh; min-height: 700px; border: 0; background: white; }
+    .chat-bar { flex-shrink: 0; }
+    .chat-bar a { flex-shrink: 0; }
+    iframe { display: block; flex: 1; width: 100%; min-height: 0; border: 0; background: white; }
     .frame-help { color: var(--muted); font-size: 12px; margin: 10px 2px 0; }
     .resources { padding: 55px 0 45px; }
     h2 { margin: 0; font-size: 24px; line-height: 1.3; font-weight: 600; letter-spacing: -.6px; }
@@ -65,14 +68,15 @@
       .reports { grid-template-columns: 1fr; }
       .resources { padding-top: 36px; }
       .resource-row { align-items: start; flex-direction: column; gap: 9px; }
-      iframe { height: 80svh; }
     }
     @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
   </style>
 </head>
 <body>
   <a class="skip" href="#chatbot">Skip to chatbot</a>
-  <header class="wrap">
+  <main class="wrap">
+  <div class="first-screen">
+  <header>
     <div class="profile">
       <span class="name">Danial Baledi</span>
       <div class="links" aria-label="Contact and profiles">
@@ -96,7 +100,6 @@
       <a href="#repository">Source code</a>
     </nav>
   </header>
-  <main class="wrap">
     <section id="chatbot" class="chat" aria-label="MITRE ATT&CK chatbot">
       <div class="chat-bar">
         <span>Ask a question, describe a behavior, or explore an ATT&amp;CK ID.</span>
@@ -105,6 +108,7 @@
       <iframe src="https://dify.bdanial.ir/chatbot/6qWIhxLLZ1ewZVbA" title="MITRE ATT&CK cybersecurity chatbot" allow="microphone;clipboard-write"></iframe>
     </section>
     <p class="frame-help">If the embedded chat does not load, <a href="https://dify.bdanial.ir/chatbot/6qWIhxLLZ1ewZVbA" target="_blank" rel="noopener noreferrer">open it in a separate tab</a>.</p>
+  </div>
     <section class="resources" id="reports" aria-labelledby="reports-title">
       <h2 id="reports-title">Reports &amp; resources</h2>
       <p class="section-note">Reading the full report is recommended for a detailed account of the design and implementation.</p>
