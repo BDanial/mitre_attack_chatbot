@@ -1,141 +1,630 @@
 <!doctype html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Danial Baledi's CIC PhD assessment project: a MITRE ATT&CK chatbot, technical reports, documentation, and source code.">
+  <meta name="description"
+    content="Danial Baledi's CIC PhD assessment project: a MITRE ATT&CK chatbot, technical reports, documentation, and source code.">
   <title>CIC Assessment Task — MITRE ATT&CK Chatbot | Danial Baledi</title>
+
   <style>
-    :root { color-scheme: light; --ink: #202635; --muted: #626a7a; --line: #dfe3eb; --blue: #304c9c; }
-    * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; scroll-padding-top: 20px; }
-    body { margin: 0; background: #f6f7fa; color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.6; }
-    a { color: var(--blue); text-underline-offset: 4px; }
-    a:hover { color: #162d6d; }
-    a:focus-visible { outline: 3px solid #7b94d8; outline-offset: 5px; border-radius: 2px; }
-    .skip { position: absolute; left: 16px; top: -70px; padding: 10px 16px; background: white; z-index: 2; }
-    .skip:focus { top: 10px; }
-    .wrap { width: min(1120px, calc(100% - 48px)); margin-inline: auto; }
-    .first-screen { display: grid; grid-template-rows: auto minmax(360px, 1fr) auto; height: 100vh; height: 100dvh; min-height: min-content; padding-bottom: 12px; }
-    header { padding-top: 25px; }
-    .profile { display: flex; justify-content: space-between; align-items: center; gap: 12px 24px; flex-wrap: wrap; }
-    .name { font-size: 17px; font-weight: 650; letter-spacing: -.3px; }
-    .links { display: flex; gap: 8px 20px; flex-wrap: wrap; font-size: 13px; }
-    .links a { color: var(--muted); text-decoration: none; }
-    .links a:hover { color: var(--blue); text-decoration: underline; }
-    .heading { display: flex; justify-content: space-between; align-items: end; gap: 16px; padding: 22px 0 18px; }
-    .eyebrow { margin: 0 0 5px; color: var(--blue); font-size: 11px; font-weight: 650; letter-spacing: 1.7px; text-transform: uppercase; }
-    h1 { margin: 0; font-size: clamp(25px, 4vw, 36px); line-height: 1.2; font-weight: 620; letter-spacing: -1.2px; }
-    .intro { margin: 7px 0 0; font-size: 13px; color: var(--muted); }
-    nav { display: flex; flex-wrap: wrap; gap: 8px 22px; padding: 11px 0; border-top: 1px solid var(--line); font-size: 13px; }
-    nav a { text-decoration: none; color: var(--muted); }
-    nav a:first-child { color: var(--blue); font-weight: 600; }
-    nav a:hover { text-decoration: underline; }
-    .chat { display: flex; flex-direction: column; min-height: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: white; box-shadow: 0 5px 24px #20263505; }
-    .chat-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 12px; }
-    .chat-bar span { color: var(--muted); }
-    .chat-bar { flex-shrink: 0; }
-    .chat-bar a { flex-shrink: 0; }
-    iframe { display: block; flex: 1; width: 100%; min-height: 0; border: 0; background: white; }
-    .frame-help { color: var(--muted); font-size: 12px; margin: 10px 2px 0; }
-    .resources { padding: 55px 0 45px; }
-    h2 { margin: 0; font-size: 24px; line-height: 1.3; font-weight: 600; letter-spacing: -.6px; }
-    .section-note { color: var(--muted); margin: 8px 0 22px; font-size: 14px; }
-    .reports { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .report { padding: 24px; background: white; border: 1px solid var(--line); border-radius: 10px; }
-    .report.featured { border-color: #aebce0; }
-    .label { display: inline-block; color: var(--blue); font-size: 10px; font-weight: 700; letter-spacing: 1.1px; text-transform: uppercase; margin-bottom: 12px; }
-    h3 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -.3px; }
-    .report p { margin: 9px 0 20px; font-size: 14px; color: var(--muted); }
-    .download { display: inline-flex; align-items: center; gap: 12px; padding: 9px 14px; border-radius: 6px; background: var(--blue); color: white; font-size: 13px; font-weight: 550; text-decoration: none; }
-    .download:hover { color: white; background: #243d82; }
-    .secondary { background: #eef1f8; color: var(--blue); }
-    .secondary:hover { color: var(--blue); background: #e1e7f5; }
-    .resource-row { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 22px 0; border-bottom: 1px solid var(--line); }
-    .resource-row h3 { font-size: 15px; }
-    .resource-row p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
-    .resource-row > a { font-size: 13px; flex-shrink: 0; }
-    footer { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 0 0 25px; color: var(--muted); font-size: 11px; }
-    @media (max-width: 600px) {
-      .wrap { width: calc(100% - 28px); }
-      header { padding-top: 18px; }
-      .profile { gap: 6px; }
-      .links { gap: 5px 15px; font-size: 12px; }
-      .heading { padding: 17px 0 14px; }
-      .intro { font-size: 12px; }
-      nav { gap: 16px; }
-      .chat-bar { padding-inline: 12px; font-size: 11px; }
-      .reports { grid-template-columns: 1fr; }
-      .resources { padding-top: 36px; }
-      .resource-row { align-items: start; flex-direction: column; gap: 9px; }
+    :root {
+      color-scheme: light;
+      --ink: #202635;
+      --muted: #626a7a;
+      --line: #dfe3eb;
+      --blue: #304c9c;
+      --bg: #f6f7fa;
+      --card: #ffffff;
+
+      /*
+        IMPORTANT:
+        Keep the embedded Dify viewport below its desktop breakpoint.
+        The wide Dify layout is what causes the long welcome screen to
+        appear clipped/scrolled on desktop. 640px keeps the embedded app
+        in its compact/mobile layout even on a wide monitor.
+      */
+      --chat-width: 640px;
     }
-    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      scroll-padding-top: 24px;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.6;
+    }
+
+    a {
+      color: var(--blue);
+      text-underline-offset: 4px;
+    }
+
+    a:hover {
+      color: #162d6d;
+    }
+
+    a:focus-visible {
+      outline: 3px solid #7b94d8;
+      outline-offset: 4px;
+      border-radius: 3px;
+    }
+
+    .wrap {
+      width: min(1220px, calc(100% - 48px));
+      margin-inline: auto;
+    }
+
+    .skip {
+      position: absolute;
+      left: 16px;
+      top: -80px;
+      z-index: 20;
+      padding: 10px 16px;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+    }
+
+    .skip:focus {
+      top: 10px;
+    }
+
+    /* ---------------- Top bar ---------------- */
+
+    .site-header {
+      min-height: 68px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .name {
+      font-size: 17px;
+      font-weight: 680;
+      letter-spacing: -.3px;
+      white-space: nowrap;
+    }
+
+    .top-links {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px 20px;
+      flex-wrap: wrap;
+      font-size: 13px;
+    }
+
+    .top-links a {
+      color: var(--muted);
+      text-decoration: none;
+    }
+
+    .top-links a:hover {
+      color: var(--blue);
+      text-decoration: underline;
+    }
+
+    /* ---------------- Hero ---------------- */
+
+    /*
+      The old design stacked a large header above a full-width iframe.
+      That spent too much vertical space and also gave Dify a desktop-size
+      iframe viewport.
+
+      This version places the project introduction beside the chatbot.
+      Result:
+      1) the complete chat shell fits in the browser viewport;
+      2) Dify receives a narrow iframe viewport and uses its compact layout.
+    */
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(300px, 1fr) minmax(0, var(--chat-width));
+      gap: clamp(28px, 4vw, 58px);
+      align-items: center;
+      min-height: calc(100dvh - 68px);
+      padding: 26px 0 30px;
+    }
+
+    .hero-copy {
+      align-self: center;
+      max-width: 540px;
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--blue);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.7px;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 560px;
+      font-size: clamp(34px, 4.2vw, 58px);
+      line-height: 1.04;
+      font-weight: 650;
+      letter-spacing: -1.8px;
+    }
+
+    .intro {
+      margin: 16px 0 0;
+      max-width: 520px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.75;
+    }
+
+    .hero-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 18px;
+      margin-top: 25px;
+      font-size: 13px;
+    }
+
+    .hero-nav a {
+      text-decoration: none;
+      font-weight: 550;
+    }
+
+    .hero-nav a:hover {
+      text-decoration: underline;
+    }
+
+    .project-note {
+      margin-top: 30px;
+      padding: 17px 18px;
+      border-left: 3px solid #aebce0;
+      background: rgba(255, 255, 255, .55);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    /* ---------------- Chat ---------------- */
+
+    .chat-column {
+      width: 100%;
+      max-width: var(--chat-width);
+      justify-self: end;
+    }
+
+    .chat {
+      /*
+        This height is based on the browser viewport instead of the old
+        "remaining grid space". It keeps the entire chat CARD on-screen
+        on normal desktop displays.
+      */
+      height: clamp(620px, calc(100dvh - 112px), 820px);
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: white;
+      box-shadow: 0 12px 40px rgba(32, 38, 53, .08);
+    }
+
+    .chat-bar {
+      flex: 0 0 auto;
+      min-height: 44px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      padding: 9px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+      font-size: 12px;
+    }
+
+    .chat-bar span {
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .chat-bar a {
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+
+    .chat iframe {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      flex: 1 1 auto;
+      border: 0;
+      background: white;
+    }
+
+    .frame-help {
+      margin: 8px 2px 0;
+      color: var(--muted);
+      font-size: 11px;
+      text-align: right;
+    }
+
+    /* ---------------- Resources ---------------- */
+
+    .resources {
+      padding: 70px 0 48px;
+      border-top: 1px solid var(--line);
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.3;
+      font-weight: 620;
+      letter-spacing: -.7px;
+    }
+
+    .section-note {
+      margin: 8px 0 24px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .reports {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .report {
+      padding: 24px;
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+
+    .report.featured {
+      border-color: #aebce0;
+    }
+
+    .label {
+      display: inline-block;
+      margin-bottom: 12px;
+      color: var(--blue);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.1px;
+      text-transform: uppercase;
+    }
+
+    h3 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: -.3px;
+    }
+
+    .report p {
+      margin: 9px 0 20px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .download {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      padding: 9px 14px;
+      border-radius: 6px;
+      background: var(--blue);
+      color: white;
+      font-size: 13px;
+      font-weight: 550;
+      text-decoration: none;
+    }
+
+    .download:hover {
+      color: white;
+      background: #243d82;
+    }
+
+    .secondary {
+      background: #eef1f8;
+      color: var(--blue);
+    }
+
+    .secondary:hover {
+      color: var(--blue);
+      background: #e1e7f5;
+    }
+
+    .resource-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20px;
+      padding: 22px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .resource-row h3 {
+      font-size: 15px;
+    }
+
+    .resource-row p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .resource-row>a {
+      flex-shrink: 0;
+      font-size: 13px;
+    }
+
+    footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      padding: 0 0 25px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    /* ---------------- Responsive ---------------- */
+
+    /*
+      If the browser itself gets too narrow for the two-column composition,
+      stack the page. The iframe still remains <= 640px wide.
+    */
+    @media (max-width: 980px) {
+      .site-header {
+        padding: 15px 0;
+        align-items: flex-start;
+      }
+
+      .hero {
+        grid-template-columns: 1fr;
+        min-height: auto;
+        padding-top: 38px;
+      }
+
+      .hero-copy {
+        max-width: 680px;
+      }
+
+      .chat-column {
+        justify-self: center;
+      }
+
+      .chat {
+        height: min(780px, 82dvh);
+        min-height: 620px;
+      }
+
+      h1 {
+        font-size: clamp(34px, 7vw, 52px);
+      }
+    }
+
+    @media (max-width: 640px) {
+      .wrap {
+        width: calc(100% - 28px);
+      }
+
+      .site-header {
+        min-height: auto;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .top-links {
+        justify-content: flex-start;
+        gap: 5px 15px;
+        font-size: 12px;
+      }
+
+      .hero {
+        padding: 26px 0 28px;
+        gap: 22px;
+      }
+
+      h1 {
+        font-size: clamp(31px, 10vw, 44px);
+      }
+
+      .intro {
+        font-size: 14px;
+      }
+
+      .project-note {
+        display: none;
+      }
+
+      .chat {
+        height: 78dvh;
+        min-height: 560px;
+        border-radius: 10px;
+      }
+
+      .chat-bar {
+        min-height: 42px;
+        padding-inline: 11px;
+        font-size: 11px;
+      }
+
+      .chat-bar span {
+        max-width: 66%;
+      }
+
+      .reports {
+        grid-template-columns: 1fr;
+      }
+
+      .resources {
+        padding-top: 45px;
+      }
+
+      .resource-row {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 9px;
+      }
+    }
+
+    @media (max-height: 720px) and (min-width: 981px) {
+      .hero {
+        align-items: start;
+        padding-top: 18px;
+      }
+
+      .hero-copy {
+        padding-top: 24px;
+      }
+
+      .chat {
+        height: calc(100dvh - 100px);
+        min-height: 560px;
+      }
+
+      .project-note {
+        display: none;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+    }
   </style>
 </head>
+
 <body>
   <a class="skip" href="#chatbot">Skip to chatbot</a>
-  <main class="wrap">
-  <div class="first-screen">
-  <header>
-    <div class="profile">
-      <span class="name">Danial Baledi</span>
-      <div class="links" aria-label="Contact and profiles">
-        <a href="https://github.com/bdanial" target="_blank" rel="noopener noreferrer">GitHub</a>
-        <a href="https://www.linkedin.com/in/bdanial/" target="_blank" rel="noopener noreferrer">LinkedIn</a>
-        <a href="https://huggingface.co/bdanial" target="_blank" rel="noopener noreferrer">Hugging Face</a>
-        <a href="mailto:baledi.danial@gmail.com">baledi.danial@gmail.com</a>
-      </div>
+
+  <header class="site-header wrap">
+    <span class="name">Danial Baledi</span>
+    <div class="top-links" aria-label="Contact and profiles">
+      <a href="https://github.com/bdanial" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href="https://www.linkedin.com/in/bdanial/" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+      <a href="https://huggingface.co/bdanial" target="_blank" rel="noopener noreferrer">Hugging Face</a>
+      <a href="mailto:baledi.danial@gmail.com">baledi.danial@gmail.com</a>
     </div>
-    <div class="heading">
-      <div>
+  </header>
+
+  <main>
+    <section class="hero wrap">
+      <div class="hero-copy">
         <p class="eyebrow">CIC Assessment Task · UNB PhD Application</p>
         <h1>MITRE ATT&amp;CK Chatbot</h1>
-        <p class="intro">A cybersecurity question-answering project by Danial Baledi, prepared for the Canadian Institute for Cybersecurity.</p>
+
+        <p class="intro">
+          A cybersecurity question-answering project by Danial Baledi,
+          prepared for the Canadian Institute for Cybersecurity.
+        </p>
+
+        <nav class="hero-nav" aria-label="Page navigation">
+          <a href="#chatbot">Chatbot</a>
+          <a href="#reports">Reports</a>
+          <a href="#documentation">Documentation</a>
+          <a href="#repository">Source code</a>
+        </nav>
+
+        <div class="project-note">
+          Ask about ATT&amp;CK techniques, tactics, threat groups, software,
+          mitigations, or observed behavior. The assistant combines structured
+          queries with semantic and lexical retrieval.
+        </div>
       </div>
-    </div>
-    <nav aria-label="Page navigation">
-      <a href="#chatbot">Chatbot</a>
-      <a href="#reports">Reports</a>
-      <a href="#documentation">Documentation</a>
-      <a href="#repository">Source code</a>
-    </nav>
-  </header>
-    <section id="chatbot" class="chat" aria-label="MITRE ATT&CK chatbot">
-      <div class="chat-bar">
-        <span>Ask a question, describe a behavior, or explore an ATT&amp;CK ID.</span>
-        <a href="https://dify.bdanial.ir/chatbot/6qWIhxLLZ1ewZVbA" target="_blank" rel="noopener noreferrer">Open chat ↗</a>
+
+      <div class="chat-column">
+        <section id="chatbot" class="chat" aria-label="MITRE ATT&CK chatbot">
+          <div class="chat-bar">
+            <span>Ask a question, describe a behavior, or explore an ATT&amp;CK ID.</span>
+            <a href="https://dify.bdanial.ir/chatbot/6qWIhxLLZ1ewZVbA" target="_blank" rel="noopener noreferrer">Open
+              chat ↗</a>
+          </div>
+
+          <iframe src="https://dify.bdanial.ir/chatbot/6qWIhxLLZ1ewZVbA" title="MITRE ATT&CK cybersecurity chatbot"
+            allow="microphone; clipboard-write" loading="eager"></iframe>
+        </section>
+
+        <p class="frame-help">
+          If the embedded chat does not load,
+          <a href="https://dify.bdanial.ir/chatbot/6qWIhxLLZ1ewZVbA" target="_blank" rel="noopener noreferrer">open it
+            in a separate tab</a>.
+        </p>
       </div>
-      <iframe src="https://dify.bdanial.ir/chatbot/6qWIhxLLZ1ewZVbA" title="MITRE ATT&CK cybersecurity chatbot" allow="microphone;clipboard-write"></iframe>
     </section>
-    <p class="frame-help">If the embedded chat does not load, <a href="https://dify.bdanial.ir/chatbot/6qWIhxLLZ1ewZVbA" target="_blank" rel="noopener noreferrer">open it in a separate tab</a>.</p>
-  </div>
-    <section class="resources" id="reports" aria-labelledby="reports-title">
+
+    <section class="resources wrap" id="reports" aria-labelledby="reports-title">
       <h2 id="reports-title">Reports &amp; resources</h2>
-      <p class="section-note">Reading the full report is recommended for a detailed account of the design and implementation.</p>
+      <p class="section-note">
+        Reading the full report is recommended for a detailed account of the design and implementation.
+      </p>
+
       <div class="reports">
         <article class="report featured">
           <span class="label">Recommended · PDF</span>
           <h3>Full project report</h3>
           <p>The complete technical account of the data pipeline, retrieval design, and orchestration.</p>
-          <a class="download" href="https://github.com/BDanial/mitre_attack_chatbot/raw/refs/heads/main/docs/report.pdf" download="Danial-Baledi-CIC-Full-Report.pdf">Download full report <span aria-hidden="true">↓</span></a>
+          <a class="download" href="https://github.com/BDanial/mitre_attack_chatbot/raw/refs/heads/main/docs/report.pdf"
+            download="Danial-Baledi-CIC-Full-Report.pdf">
+            Download full report <span aria-hidden="true">↓</span>
+          </a>
         </article>
+
         <article class="report">
           <span class="label">Three-page summary · PDF</span>
           <h3>Submission report</h3>
           <p>A concise, three-page version for a quick review of the project.</p>
-          <a class="download secondary" href="https://github.com/BDanial/mitre_attack_chatbot/raw/refs/heads/main/docs/report_3_pages_summary.pdf" download="Danial-Baledi-CIC-Three-Page-Report.pdf">Download three-page report <span aria-hidden="true">↓</span></a>
+          <a class="download secondary"
+            href="https://github.com/BDanial/mitre_attack_chatbot/raw/refs/heads/main/docs/report_3_pages_summary.pdf"
+            download="Danial-Baledi-CIC-Three-Page-Report.pdf">
+            Download three-page report <span aria-hidden="true">↓</span>
+          </a>
         </article>
       </div>
+
       <div class="resource-row" id="documentation">
-        <div><h3>All documentation</h3><p>Data schemas, API contracts, operating instructions, and orchestrator documentation.</p></div>
-        <a href="https://github.com/BDanial/mitre_attack_chatbot/tree/main/docs" target="_blank" rel="noopener noreferrer">Browse all docs ↗</a>
+        <div>
+          <h3>All documentation</h3>
+          <p>Data schemas, API contracts, operating instructions, and orchestrator documentation.</p>
+        </div>
+        <a href="https://github.com/BDanial/mitre_attack_chatbot/tree/main/docs" target="_blank"
+          rel="noopener noreferrer">Browse all docs ↗</a>
       </div>
+
       <div class="resource-row" id="repository">
-        <div><h3>Project repository</h3><p>Source code, setup instructions, tests, and Dify workflow files.</p></div>
-        <a href="https://github.com/BDanial/mitre_attack_chatbot" target="_blank" rel="noopener noreferrer">View on GitHub ↗</a>
+        <div>
+          <h3>Project repository</h3>
+          <p>Source code, setup instructions, tests, and Dify workflow files.</p>
+        </div>
+        <a href="https://github.com/BDanial/mitre_attack_chatbot" target="_blank" rel="noopener noreferrer">View on
+          GitHub ↗</a>
       </div>
     </section>
   </main>
-  <footer class="wrap"><span>Danial Baledi · CIC assessment project</span><span>Knowledge source: MITRE ATT&amp;CK</span></footer>
+
+  <footer class="wrap">
+    <span>Danial Baledi · CIC assessment project</span>
+    <span>Knowledge source: MITRE ATT&amp;CK</span>
+  </footer>
 </body>
+
 </html>
