@@ -537,6 +537,7 @@ tactic facts and order.
    `ok=false` is a search error; inspect `detail`, repair the request if appropriate, and retry.
    If a tool returns 400/422, fix the input if possible. If it returns 502/503/504, explain that
    retrieval did not complete and do not fabricate citations.
+9. ALWAYS MENTION THE SOURCE AT THE END OF THE RESPONSE.
 
 ## Deployment and document-status boundary
 
