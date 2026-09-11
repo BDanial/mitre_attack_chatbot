@@ -1,0 +1,99 @@
+﻿Question,Answer,Is_Answer_Correct,Is_Source_Correct,SRC
+Which tactics involved running code on the host's machine? Give examples of techniques that use this tactic.," The tactic is **Execution (TA0002)**—the adversary’s objective is to run malicious or adversary-controlled code on a local or remote host.
+
+Examples of techniques associated with Execution include:
+
+- **T1059 — Command and Scripting Interpreter:** Uses command-line or scripting environments to execute commands.
+  - **T1059.001 — PowerShell**
+  - **T1059.003 — Windows Command Shell**
+  - **T1059.004 — Unix Shell**
+- **T1204 — User Execution:** Tricks a user into opening a malicious file or link.
+- **T1047 — Windows Management Instrumentation:** Uses WMI to execute commands or payloads, locally or remotely.
+- **T1053 — Scheduled Task/Job:** Schedules code to run at a specified time or event.
+- **T1106 — Native API:** Executes behavior by calling operating-system APIs.
+- **T1129 — Shared Modules:** Runs code by loading shared libraries or modules.
+
+Some of these techniques may also support other tactics, such as Persistence or Privilege Escalation; tactic membership describes the adversary objective in a particular context.
+
+**Source:** MITRE Enterprise ATT&CK 19.2 snapshot — **TA0002, Execution**, and its associated technique mappings.",TRUE,TRUE,
+What MITRE ATT&CK tactic does Command and Scripting Interpreter (T1059) belong to?," **Command and Scripting Interpreter (T1059)** belongs to the **Execution tactic (TA0002)**.
+
+Execution covers techniques used to run adversary-controlled code on local or remote systems.
+
+**Source:** Enterprise MITRE ATT&CK 19.2 snapshot, active `technique_tactics` relationship for `T1059 → TA0002`.",TRUE,TRUE,https://attack.mitre.org/techniques/T1059/
+"What are the T1059 sub-techniques for PowerShell, Windows Command Shell, and Python?","I’ll verify the exact active sub-technique IDs and their parent relationship in the Enterprise ATT&CK snapshot.
+
+- **T1059.001 — PowerShell**
+- **T1059.003 — Windows Command Shell**
+- **T1059.006 — Python**
+
+All three are sub-techniques of **T1059 — Command and Scripting Interpreter**.
+
+**Source:** Enterprise MITRE ATT&CK 19.2 snapshot.",TRUE,TRUE,https://attack.mitre.org/techniques/T1059/
+"According to MITRE ATT&CK, how does spearphishing differ from general phishing?","I’ll compare MITRE ATT&CK’s description of the parent technique **Phishing (T1566)** with its spearphishing sub-techniques.
+
+In MITRE ATT&CK, **Phishing (T1566)** is the broad technique: adversaries send social-engineering messages to gain access to victim systems.
+
+**Spearphishing** is the targeted form of phishing. It uses messages crafted for a specific person, organization, or role to appear more credible and induce a particular action. ATT&CK divides it by delivery method:
+
+- **T1566.001 — Spearphishing Attachment:** a malicious attachment
+- **T1566.002 — Spearphishing Link:** a link to malicious content or credential collection
+- **T1566.003 — Spearphishing via Service:** delivery through a third-party service, such as social media or another messaging platform
+- **T1566.004 — Spearphishing Voice:** targeted voice communications
+
+So, in brief: **phishing is the general social-engineering category; spearphishing is targeted phishing classified in ATT&CK by how the lure or malicious content is delivered.** In ATT&CK’s hierarchy, these are direct sub-techniques of **T1566**, not separate unrelated techniques.
+
+**Source:** MITRE Enterprise ATT&CK 19.2 — **T1566 Phishing** and sub-techniques **T1566.001–T1566.004**.",TRUE,TRUE,https://attack.mitre.org/techniques/T1566/
+What are the four sub-techniques of Phishing (T1566)?,"I’ll query the current Enterprise ATT&CK snapshot for active direct `subtechnique-of` relationships under T1566.
+
+The four active sub-techniques of **Phishing (T1566)** are:
+
+1. **T1566.001 — Spearphishing Attachment**
+2. **T1566.002 — Spearphishing Link**
+3. **T1566.003 — Spearphishing via Service**
+4. **T1566.004 — Spearphishing Voice**
+
+**Source:** MITRE Enterprise ATT&CK 19.2 snapshot, **Phishing (T1566)** hierarchy.",TRUE,TRUE,https://attack.mitre.org/techniques/T1566/
+Why might an adversary use application-layer protocols for command-and-control communication?,"An adversary may use **application-layer protocols** for command-and-control (C2) to:
+
+- **Blend malicious communication into normal network traffic**, making it less conspicuous.
+- **Avoid detection or network filtering**, since commonly used protocols are often permitted through firewalls and proxies.
+- **Embed commands and command results inside legitimate-looking protocol traffic** between a compromised client and a remote server.
+- **Reuse protocols already present in the environment**, including web, file-transfer, email, DNS, and publish/subscribe protocols.
+- For internal C2 or pivoting, hide communication among ordinary **SMB, SSH, or RDP** activity.
+
+ATT&CK maps this behavior to **T1071 — Application Layer Protocol**, under **TA0011 — Command and Control**. The record is active in the Enterprise ATT&CK 19.2 snapshot.
+
+**Source:** MITRE ATT&CK Enterprise 19.2, **T1071 — Application Layer Protocol**, retrieved from the project’s PostgreSQL dataset.",TRUE,TRUE,https://attack.mitre.org/techniques/T1071/
+What are the five sub-techniques of Application Layer Protocol (T1071)?,"The five active sub-techniques of **T1071 — Application Layer Protocol** are:
+
+1. **T1071.001 — Web Protocols**
+2. **T1071.002 — File Transfer Protocols**
+3. **T1071.003 — Mail Protocols**
+4. **T1071.004 — DNS**
+5. **T1071.005 — Publish/Subscribe Protocols**
+
+This is the complete active child list based on explicit `subtechnique-of` relationships.
+
+**Source:** MITRE ATT&CK Enterprise 19.2 snapshot, PostgreSQL `attack.techniques` and `attack.relationships`.",TRUE,TRUE,https://attack.mitre.org/techniques/T1071/
+Which ATT&CK tactic is Remote Services (T1021) associated with?," **Remote Services (T1021)** is associated with **Lateral Movement (TA0008)**.
+
+**Source:** Enterprise MITRE ATT&CK 19.2 snapshot, active `attack.technique_tactics` relationship for `T1021`.",TRUE,TRUE,https://attack.mitre.org/techniques/T1021/
+Name four remote-access mechanisms listed as sub-techniques of T1021.,"Four active sub-techniques of **Remote Services (T1021)** are:
+
+- **T1021.001 — Remote Desktop Protocol**
+- **T1021.002 — SMB/Windows Admin Shares**
+- **T1021.004 — SSH**
+- **T1021.005 — VNC**
+
+**Source:** Enterprise MITRE ATT&CK 19.2 snapshot; active `subtechnique-of` relationships for T1021.",TRUE,TRUE,https://attack.mitre.org/techniques/T1021/
+Can brute forcing be performed both online and offline? Explain briefly,"I’ll distinguish ATT&CK’s online account-guessing behavior from offline password cracking.
+
+Yes. In MITRE ATT&CK, brute forcing can occur in both forms:
+
+- **Online:** Attempts are made directly against a live authentication service. Examples include guessing passwords (**T1110.001 Password Guessing**) or trying username/password pairs from previous breaches (**T1110.004 Credential Stuffing**). These attempts may trigger lockouts and authentication logs.
+- **Offline:** An adversary first obtains password hashes or encrypted credential material, then tests candidate passwords locally without contacting the target service (**T1110.002 Password Cracking**). This avoids account lockouts and can run at high speed, but requires access to the credential material.
+
+Both fall under **T1110 — Brute Force**.
+
+**Source:** MITRE Enterprise ATT&CK 19.2 — T1110, T1110.001, T1110.002, and T1110.004.",TRUE,TRUE,https://attack.mitre.org/techniques/T1110
