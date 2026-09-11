@@ -28,7 +28,7 @@
 
 7\. Agent Formulation and Orchestration
 
-8\. Testing, Evaluation, and Limitations
+8\. Testing, Evaluation, Challenges, Limitations, and Improvements
 
 9. Disclosure of AI Assistance
 
@@ -78,7 +78,7 @@ graph TD
 
 ## **2\. Data Acquisition and ATT\&CK Graph Extraction**
 
-The knowledge base was obtained from MITRE's official [ATT\&CK STIX repository](https://github.com/mitre-attack/attack-stix-data), specifically the Enterprise ATT\&CK v19.2 (STIX 2.1 format) bundle. STIX was selected because it provides both the descriptive content needed for retrieval and the object identifiers and relationships needed to preserve ATT\&CK semantics.
+The knowledge base was obtained from MITRE's official [ATT\&CK STIX repository](https://github.com/mitre-attack/attack-stix-data), specifically the complete Enterprise ATT\&CK v19.2 (STIX 2.1 format) bundle. Although the assignment refers to preparing a small set of authoritative cybersecurity documents, this implementation deliberately does not use a small document set. It processes the full Enterprise ATT\&CK bundle and retains 6,520 filtered STIX objects, from which 23,240 retrieval points are produced. STIX was selected because it provides both the descriptive content needed for retrieval and the object identifiers and relationships needed to preserve ATT\&CK semantics.
 
 The extraction stage first identifies every attack-pattern and maps its STIX identifier to its human-readable ATT\&CK identifier (for example, T1059.001). Before reducing the graph, it extracts non-empty descriptions from uses relationships whose target is a technique. These descriptions are valuable procedure examples: they express how an actor, campaign, malware, or tool used a technique in an observed context. Each extracted example retains the target technique identifier, so it can later be retrieved as text and verified against the graph.
 
@@ -216,15 +216,77 @@ To see the full orcherastor system prompt, please refer to *docs/orchestrator/sy
 
 System resilience is a core component of the orchestration policy. The workflow agents are equipped with fail branches and retry mechanisms. If retrieval remains unavailable or yields no evidence, the agent is strictly instructed to explicitly state the limitation rather than fabricate a response.
 
-## **8\. Testing, Evaluation, and Limitations**
+### **7.4. Technology and Model Selection Rationale**
 
-To evaluate the system's accuracy and adherence to the evidence-grounded policy, a manual validation test was conducted. 12 random pages were selected from the official MITRE Enterprise ATT\&CK website, and two distinct questions were formulated from each page, resulting in a representative test set of 24 queries. The multi-agent system successfully processed all 24 queries, returning accurate, fully grounded answers correctly supported by cited evidence from the local databases without relying on the LLM's pre-trained knowledge. The test queries and their corresponding system outputs are included in the final deliverables.
+The rationale for most architectural and technology choices has already been presented in the preceding sections. The following discussion therefore focuses on several selections whose justification was not previously stated directly.
 
-While the system demonstrated high precision during this functional test, several limitations and areas for future work remain:
+**Language Model:** The language model is configurable independently of the agent architecture and retrieval backend. The current deployment uses GPT-5.6 (`openai/gpt-5.6-sol` through OpenRouter) because it provides a capable general-purpose baseline across instruction following, tool use, reasoning, structured outputs, and multi-turn interaction. The workflow does not depend on capabilities unique to this model: the model can be replaced with a smaller or larger model, or with an open-source or commercial model, provided that the replacement can follow the tool contracts and grounding policy reliably. This separation allows deployments to choose a different balance of quality, latency, privacy, infrastructure requirements, and cost without redesigning the agents or databases.
 
-* **Interaction Scope:** The current evaluation exclusively tested single-turn queries. Although the orchestrator is configured with a 25-turn conversation memory, complex multi-turn reasoning and context-retention tracking require distinct evaluation scenarios.  
-* **Adversarial Testing (Red-Teaming):** Explicit out-of-scope safeguards and strict answering policies are embedded within the system prompt. However, rigorous adversarial testing—such as complex prompt injection or jailbreak attempts designed to bypass these safeguards and force hallucinated advice—was not conducted.  
-* **Evaluation Complexity:** Comprehensive, quantitative evaluation of RAG systems (e.g., calculating Answer Relevance, Faithfulness, and Context Precision using frameworks like RAGAS or TruLens) is an intricate, standalone research domain. While absolutely vital for a production-grade deployment, exhaustive benchmarking and red-teaming fall outside the constrained scope of this mini-project and represent the primary avenue for future development.
+**Embedding Model:** `google/gemini-embedding-2` was selected based on the author's practical experience with embedding models. Among the models considered for this project, it provided the strongest combination of multilingual representation and support for varied retrieval tasks. These properties are particularly relevant because users may describe security behavior in languages such as Persian while the ATT\&CK evidence is predominantly written in English. The same model is used consistently for document and query vectors, while lexical BM25 retrieval remains available when exact terminology, identifiers, commands, or paths are more important than semantic similarity.
+
+**Vector Database:** Qdrant was selected because it is among the fastest-performing vector databases in the evaluations considered during the project and provides substantial flexibility in both storage and retrieval. It supports dense vectors, native sparse BM25 vectors, cosine similarity, payload metadata, indexed filters, hybrid retrieval, and collection aliases within the same system. These capabilities allow one evidence point to carry both retrieval representations and a verifiable link to its PostgreSQL source. They also support filtered search, resumable indexing, and atomic alias-based publication without requiring separate dense and lexical databases.
+
+**Agent Framework:** Dify was selected because it provides a production-oriented environment for assembling and operating agentic applications, rather than only a low-level experimental agent library. Its visual workflows, reusable tools, configurable model providers, conversation memory, credential handling, retry and failure branches, and exportable DSL definitions made it faster and more reliable to turn the retrieval backend into an operational chatbot. Dify also keeps the model, tools, and orchestration configuration separable, which simplifies maintenance and future model replacement.
+
+**Structured and Hybrid Retrieval:** PostgreSQL remains the authoritative structured store because exact ATT\&CK identifiers, complete lists, and multi-hop graph relationships require deterministic queries and cannot be guaranteed by similarity search. Qdrant complements it with semantic and lexical discovery over evidence text. Weighted reciprocal-rank fusion is used for hybrid retrieval because dense cosine scores and BM25 scores are not directly comparable. The orchestrator can select either retrieval path or combine them dynamically, giving the system both exploratory semantic recall and structured verification.
+
+### **7.5. Technology Stack**
+
+The following table summarizes the principal technologies used across the project. The deployment and development tooling is representative rather than exhaustive because supporting tools varied across local development, hosting, testing, and service troubleshooting.
+
+| Area | Technologies | Role in the Project |
+| :---- | :---- | :---- |
+| **Source Data and Formats** | MITRE Enterprise ATT\&CK 19.2, STIX 2.1, JSON, Markdown | Authoritative cybersecurity data, graph relationships, intermediate artefacts, and documentation. |
+| **Core Language and Packaging** | Python 3.10+, `uv`, Hatchling | Backend implementation, dependency management, command-line tooling, and package builds. |
+| **Document Processing** | Python, `markdown-it-py` | Cleaning ATT\&CK text, preserving technical content, constructing evidence units, and structure-aware chunking. |
+| **Relational Storage** | Self-hosted PostgreSQL, `psycopg`, `pglast` | Authoritative entity and relationship storage, transactional imports, read-only query execution, and SQL validation. PostgreSQL was self-hosted after the earlier Neon deployment produced operational errors. |
+| **Embeddings** | `google/gemini-embedding-2`, OpenRouter, OpenAI-compatible Python client | Multilingual and multitask dense embedding generation for documents and queries. |
+| **Vector and Lexical Storage** | Qdrant, `qdrant-client`, native BM25 | Dense semantic search, sparse lexical search, metadata filtering, hybrid retrieval, and index publication. |
+| **Retrieval and Fusion** | Text-to-SQL, cosine similarity, BM25, weighted reciprocal-rank fusion | Exact graph lookup, semantic discovery, precise term matching, and combined ranking. |
+| **API Backend** | FastAPI, Uvicorn, Pydantic models, API-key authentication | Authenticated SQL and evidence-search tools exposed to the agent workflows through HTTP and OpenAPI. |
+| **Agentic AI** | Dify, GPT-5.6, ReAct, importable Dify DSL workflows | Dynamic tool selection, multi-turn orchestration, error recovery, evidence-grounded synthesis, and source-aware responses. |
+| **Frontend** | HTML5, CSS3, embedded Dify chat interface | Public project presentation and browser-based access to the chatbot. |
+| **Testing and Code Quality** | pytest, Ruff, synthetic fixtures, mocked model responses, local Qdrant tests | Offline verification of data processing, API behavior, SQL safeguards, retrieval contracts, and indexing logic. |
+| **Deployment and Operations** | Docker, Nginx, Cloudflare client/tunnel, hosted PostgreSQL, hosted Qdrant, HTTPS reverse proxy, environment-based secrets | Service packaging, routing, secure external access, database hosting, configuration, and operational availability. |
+| **Version Control and Documentation** | Git, Markdown, Mermaid | Change tracking, reproducible documentation, and architecture diagrams. |
+
+## **8\. Testing, Evaluation, Challenges, Limitations, and Improvements**
+
+### **8.1. Evaluation Design and Results**
+
+To evaluate the system's accuracy and adherence to the evidence-grounded policy, a manual validation test was conducted. Five pages were selected at random from the official MITRE Enterprise ATT\&CK website. General-purpose chatbots were asked to make the random selection under the restriction that malware, campaign, and other entity categories outside the scope of this chatbot must not be selected. Two distinct questions were formulated from each selected page, producing a test set of 10 questions.
+
+For each page, the two questions were asked as a multi-turn conversation containing two to four turns. The experiment was also repeated in a single-turn setting. In both settings, all 10 questions were answered correctly and completely. The evaluation explicitly checked two separate aspects of every response: the factual correctness and completeness of the answer, and the correctness of the precise supporting source identified by the chatbot. Both checks passed for all 10 questions. The evaluation questions and their corresponding answers are available as CSV files in the `evaluation` folder.
+
+In addition, 10 boundary-handling questions covering irrelevant, ambiguous, and out-of-scope inputs were tested. Irrelevant and out-of-scope requests were correctly redirected to the chatbot's primary ATT\&CK-focused scope, while ambiguous requests were handled without presenting an unsupported interpretation as fact. All 10 boundary-handling tests passed.
+
+Accordingly, every criterion used in this experiment received a full score: factual answer correctness, answer completeness, precise supporting-source correctness, multi-turn performance, single-turn performance, and safe handling of irrelevant, ambiguous, and out-of-scope inputs each achieved 10/10 (100%). These results apply to the defined 10-question in-scope set and the 10 boundary-handling questions.
+
+### **8.2. Challenges**
+
+One of the principal technical challenges was processing the ATT\&CK graph and reducing it to the scope required by the project without losing the behavioral evidence needed for retrieval. Malware, campaign, intrusion-set, and tool nodes had to be removed while useful procedure descriptions from their `uses` relationships were preserved and linked back to the relevant techniques. The resulting graph also had to be represented consistently across PostgreSQL, Qdrant, and the metadata used for source attribution.
+
+The breadth of the implementation was another major challenge. The project required coordinated work across the supporting backend, database design, document processing, embedding and retrieval pipelines, agentic AI workflows, deployment, and DevOps. Bringing up and maintaining PostgreSQL, Qdrant, the authenticated FastAPI services, external embedding access, and the Dify workflows as one operational system required careful configuration, service monitoring, error handling, and consistency between components. Keeping these services available throughout ingestion, indexing, retrieval, and chatbot testing was therefore an important engineering challenge in addition to the AI design itself.
+
+### **8.3. Limitations**
+
+The evaluation was a focused manual assessment based on 10 in-scope questions and 10 boundary-handling questions. Although every evaluated criterion achieved a full score, the sample is too small to establish general performance across the full range of possible ATT\&CK questions. The evaluation did not include systematic prompt-injection or jailbreak testing, large-scale automated benchmarking, or extensive simulation of infrastructure and third-party service failures. Metrics such as answer relevance, faithfulness, context recall, and context precision were not calculated using an automated RAG evaluation framework.
+
+The knowledge base is limited to the Enterprise ATT\&CK domain and deliberately removes structured malware, campaign, intrusion-set, and tool entities. Their useful behavioral descriptions are preserved, but the system cannot provide complete structured attribution for those excluded entity types. Semantic and hybrid retrieval also depend on an external embedding provider, so provider availability, latency, and rate limits can affect those retrieval modes. These constraints define the scope within which the reported evaluation results should be interpreted.
+
+### **8.4. Failure Cases**
+
+During backend and integration testing, transient service and resource errors were encountered, including HTTP 507 and HTTP 503 responses. These issues occurred in the supporting infrastructure and retrieval pipeline rather than in the chatbot's reasoning behavior. They were addressed during backend testing through service recovery, retrying interrupted operations, and completing the affected indexing or retrieval workflows after the underlying service became available. The resumable indexing design reduced the need to repeat already completed work.
+
+No answer-generation, source-identification, multi-turn, or boundary-handling failure was observed in the evaluated chatbot test set. This does not imply that the system is failure-free; it means only that no behavioral failure was observed among the scenarios included in the current manual evaluation.
+
+### **8.5. Possible Improvements**
+
+Future evaluation should use a larger and more diverse question set, including more complex multi-turn conversations, multilingual inputs, difficult ambiguous cases, and systematic adversarial tests such as prompt injection and jailbreak attempts. Automated RAG evaluation could be added to measure answer relevance, faithfulness, context recall, and context precision at scale. Controlled failure-injection tests could also evaluate behavior during database outages, embedding-provider failures, timeouts, partial retrieval results, and inconsistent service states.
+
+The knowledge base could be expanded to retain structured malware, campaign, intrusion-set, and tool information, enabling richer attribution and relationship analysis. Operational improvements could include stronger monitoring, automated health checks, alerting, capacity planning, provider fallback strategies, and more extensive end-to-end regression testing across PostgreSQL, Qdrant, FastAPI, and Dify.
+
+A further extension would connect the agentic system to authorized security-management servers so that it could translate ATT\&CK-grounded analysis into proposed defensive rules or configurations. For example, the system could map an observed behavior to the most relevant ATT\&CK technique and then draft an IAM, WAF, SIEM, EDR, or application-security rule, such as requiring a CAPTCHA or step-up verification after three consecutive failed password attempts. Such a capability should initially operate in recommendation or dry-run mode: generated rules must be validated against the target platform, reviewed and approved by an authorized operator, recorded in an audit trail, tested for unintended effects, and deployed with a rollback mechanism. This would extend the project from evidence-grounded question answering toward controlled, evidence-grounded defensive action without allowing the model to make unreviewed production changes.
 
 ## **9. Disclosure of AI Assistance**
 
@@ -235,6 +297,6 @@ AI tools were used to varying degrees during the design, implementation, deploym
 | **System Design** | System architecture and design | 10% |
 | **DevOps and Hosting** | Deployment and hosting configuration | 20% |
 | **AI and Agentic Backend** | Dify-based agent workflows and orchestration | 5% |
-| **Supporting Backend** | Python, FastAPI, SQLAlchemy, Qdrant integration, and related backend code | 70% |
+| **Supporting Backend** | Python, FastAPI, psycopg, pglast, Qdrant integration, and related backend code | 70% |
 | **Frontend** | HTML interface implementation | 90% |
 | **Documentation** | Preparation of project documentation | 50% |
