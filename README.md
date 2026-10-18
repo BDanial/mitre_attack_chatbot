@@ -2,9 +2,11 @@
 
 From a behavior description to ATT&CK techniques, mitigation guidance, and detection evidence.
 
+**[Try the chatbot live →](https://attack.bdanial.ir/)**
+
 A Python backend with PostgreSQL, Qdrant, Gemini embeddings through OpenRouter, two
-API-key-protected FastAPI tools, and importable Dify workflows. Built as a technical-assessment
-project, with readable code, documented data models, and a ready-to-configure chatbot.
+API-key-protected FastAPI tools, and importable Dify workflows. Built with readable code,
+documented data models, and a ready-to-configure chatbot.
 
 ## Contents
 
@@ -632,6 +634,6 @@ Source data comes from the [official MITRE ATT&CK STIX repository](https://githu
 ATT&CK publishes its data in STIX for programmatic use.
 [MITRE data and tools](https://attack.mitre.org/resources/attack-data-and-tools/)
 
-This is an independent technical-assessment project, not an official MITRE service.
+This is an independent cybersecurity project, not an official MITRE service.
 MITRE ATT&CK is a registered trademark of The MITRE Corporation. Review upstream data terms and
 third-party dependency licenses before redistributing data or deploying the project.
