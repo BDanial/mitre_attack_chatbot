@@ -1,8 +1,8 @@
 # **Evidence-Grounded Cybersecurity Question Answering with MITRE ATT\&CK**
 
-**Candidate:** Danial Baledi
+**Author:** Danial Baledi
 
-**Application:** PhD Position, Canadian Institute for Cybersecurity (CIC), University of New Brunswick (UNB)
+**Project:** MITRE ATT&CK Chatbot
 
 
 **Contact:** [baledi.danial@gmail.com](mailto:baledi.danial@gmail.com)
